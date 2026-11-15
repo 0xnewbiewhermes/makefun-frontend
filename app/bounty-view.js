@@ -61,7 +61,7 @@ function buildDatesList(bounty) {
   const items = [
     ['Opens', bounty.opensAt || bounty.publishedAt],
     ['Deadline', bounty.deadline],
-    ...(bounty.phases || []).flatMap((phase) => [[`${phase.title} phase`, phase.startsAt && phase.endsAt ? `${formatDateTime(phase.startsAt)} → ${formatDateTime(phase.endsAt)}` : null, true]]),
+    ...(bounty.phases || []).flatMap((phase) => [[phase.title, phase.startsAt && phase.endsAt ? `${formatDateTime(phase.startsAt)} → ${formatDateTime(phase.endsAt)}` : null, true]]),
     ['Resolved', bounty.resolvedAt],
   ].filter(([, value]) => value);
   return el('dl', { className: 'dates-list' }, items.flatMap(([label, value, preformatted]) => [el('dt', null, label), el('dd', null, preformatted ? value : formatDateTime(value))]));

@@ -52,6 +52,9 @@ export function formatDateTime(iso) {
   return `${date.toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' })} UTC`;
 }
 
+/** An ISO time as a date alone: 'Nov 15, 2026'. */
+export const formatDate = (iso) => (iso ? new Date(iso).toLocaleDateString('en-US', { dateStyle: 'medium', timeZone: 'UTC' }) : '—');
+
 /** How long ago an ISO time was: '5m ago', '3h ago', '2d ago'. */
 export function formatTimeAgo(iso) {
   const seconds = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);

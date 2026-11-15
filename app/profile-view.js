@@ -2,7 +2,7 @@
 // money) and its entries, each linking to its bounty and that bounty's leaderboard.
 
 import { absoluteAssetUrl, profilePath, readCached } from './api.js';
-import { avatarImage, bountyHref, el, formatDateTime, formatScore, formatUsd, leaderboardHref, setText, statBlock } from './ui.js';
+import { avatarImage, bountyHref, el, formatDate, formatDateTime, formatScore, formatUsd, leaderboardHref, setText, statBlock } from './ui.js';
 
 const SOLUTIONS_PAGE_SIZE = 25;
 
@@ -72,7 +72,7 @@ export async function mountProfileView(container, { handle }, route) {
       refs.avatar.replaceChildren(avatarImage(avatarUrl, profile.handle, 96));
     }
     setText(refs.name, profile.display_name || `@${profile.handle}`);
-    setText(refs.handle, [`@${profile.handle}`, profile.house && 'house account', profile.joined_at && `joined ${formatDateTime(profile.joined_at).replace(/,? \d+:\d+ UTC$/, '')}`].filter(Boolean).join(' · '));
+    setText(refs.handle, [`@${profile.handle}`, profile.house && 'house account', profile.joined_at && `joined ${formatDate(profile.joined_at)}`].filter(Boolean).join(' · '));
     setText(refs.bio, profile.bio || '');
     refs.links.replaceChildren(...profileLinks(profile).map(([label, href, text]) => el('li', null, el('span', { className: 'muted' }, `${label} `), el('a', { href, target: '_blank', rel: 'noopener noreferrer' }, text))));
     refs.stats.replaceChildren(

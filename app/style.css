@@ -592,7 +592,7 @@ h1:focus {
 
 .bounty-columns {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 340px;
+  grid-template-columns: minmax(0, 1fr) 380px;
   gap: 16px;
   align-items: start;
 }
@@ -690,8 +690,9 @@ td {
   vertical-align: top;
 }
 
-thead th {
+th[scope="col"] {
   font-size: 0.75rem;
+  white-space: nowrap;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--text-muted);
@@ -701,6 +702,7 @@ thead th {
 .rewards-table td,
 .rewards-table th {
   padding: 6px 8px;
+  white-space: nowrap;
 }
 
 .prize-amount {
