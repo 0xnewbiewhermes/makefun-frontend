@@ -1,19 +1,42 @@
-// One bounty (#/bounty/<slug>): summary, the key numbers (live pot, entry fee, time left, entries), the rewards table
-// of the live pot (rewardsNow: base + fee share per place), its dates and phases, then the description and rules.
-// When the board already holds this bounty the page paints from it at once, then fills in from the bounty's own read.
+// One bounty (#/bounty/<slug>): live pot, entry fee, time left and entries up top, then the rewards table of the live
+// pot, its dates and phases, the description and the rules. It paints at once from the board's cached copy when there
+// is one, fills in from its own read, and patches the same nodes when a revalidation brings a change.
 
-import { boardPath, bountyPath, MAKEFUN_ORIGIN, peekCached, readCached } from './api.js';
+import { adoptViewStyles, apiPaths, el, entryFeeUsd, formatCount, formatEntryFee, formatUsd, isTakingEntries, leaderboardHref, livePotUsd, MAKEFUN_ORIGIN, peekCached, readCached, revalidateWhileVisible, setText, trackCountdown } from './app.js';
 import { renderMarkdown, splitMarkdownSections } from './markdown.js';
-import { el, entryFeeUsd, formatCount, formatDateTime, formatUsd, isTakingEntries, leaderboardHref, livePotUsd, setText, statBlock, trackCountdown } from './ui.js';
+import { breadcrumb, formatDateTime, statBlock } from './view-kit.js';
 
-/** The live payout curve as rows; consecutive places paying the same amount share one row ('4–10'). */
-export function payoutRows(bounty) {
-  const places = Array.isArray(bounty.rewardsNow) && bounty.rewardsNow.length
+adoptViewStyles(`
+.bounty-tags{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:8px;font-size:.9rem}
+.status-badge{padding:2px 10px;border-radius:999px;background:var(--surface-2);font-size:.8rem;font-weight:700}
+.status-badge[data-tone=live]{background:var(--money-soft);color:var(--money)}
+.status-badge[data-tone=live]::before{content:"● "}
+.bounty-summary{max-width:75ch;margin:0 0 8px;color:var(--muted);font-size:1.05rem}
+.skill-list{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 16px;padding:0;list-style:none}
+.stat-fee[data-paid] .stat-value{color:var(--accent)}
+.bounty-actions{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px}
+.bounty-columns{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:16px;align-items:start}
+.bounty-main,.bounty-aside{display:grid;gap:16px;min-width:0}
+.rewards-table td,.rewards-table th{padding:6px 8px;white-space:nowrap}
+.rewards-table thead th:last-child,.prize-amount{text-align:right}
+.prize-amount{color:var(--money);font-weight:800}
+.podium-1>:first-child{color:var(--gold);font-weight:800}
+.dates-list{display:grid;grid-template-columns:max-content 1fr;gap:6px 12px;margin:0;font-size:.9rem}
+.dates-list dt{color:var(--muted);font-weight:600}
+.dates-list dd{margin:0}
+.rules-section{padding:8px 0;border-top:1px solid var(--border)}
+.rules-section summary{padding:4px 0;font-weight:700;cursor:pointer}
+@media (max-width:900px){.bounty-columns{grid-template-columns:1fr}.bounty-aside{order:-1}}
+@media (max-width:640px){.dates-list{grid-template-columns:1fr;gap:0}.dates-list dd{margin-bottom:8px}}
+`);
+
+/** The live payout curve as rows; consecutive places paying the same amount share one row ('4th–10th'). */
+export function groupPayoutRows(bounty) {
+  const places = bounty.rewardsNow?.length
     ? bounty.rewardsNow.map((r) => ({ place: r.place, base: Number(r.baseUsd), feeShare: Number(r.feeShareUsd || 0), total: Number(r.amountUsd) }))
     : Object.entries(bounty.rewards || {}).map(([place, amount]) => ({ place: Number(place), base: Number(amount), feeShare: 0, total: Number(amount) }));
-  places.sort((a, b) => a.place - b.place);
   const rows = [];
-  for (const place of places) {
+  for (const place of places.sort((a, b) => a.place - b.place)) {
     const previous = rows.at(-1);
     if (previous && previous.total === place.total && previous.base === place.base && previous.last === place.place - 1) previous.last = place.place;
     else rows.push({ ...place, first: place.place, last: place.place });
@@ -21,35 +44,32 @@ export function payoutRows(bounty) {
   return rows;
 }
 
-function ordinal(n) {
-  const teen = n % 100 >= 11 && n % 100 <= 13;
-  return `${n}${teen ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] || 'th'}`;
-}
+const ordinal = (n) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] || 'th'}`;
 
 function bountyStatusLabel(bounty) {
-  if (isTakingEntries(bounty)) return { text: 'Taking entries', tone: 'live' };
-  if (bounty.status === 'resolved' || bounty.resolvedAt) return { text: 'Resolved', tone: 'done' };
-  return { text: 'Closed · results pending', tone: 'closed' };
+  if (isTakingEntries(bounty)) return ['Taking entries', 'live'];
+  if (bounty.status === 'resolved' || bounty.resolvedAt) return ['Resolved', 'done'];
+  return ['Closed · results pending', 'closed'];
 }
 
 function buildRewardsTable(bounty) {
-  const rows = payoutRows(bounty);
-  const hasFeeShare = rows.some((row) => row.feeShare > 0);
+  const rows = groupPayoutRows(bounty);
+  const split = rows.some((row) => row.feeShare > 0);
+  const th = (label) => el('th', { scope: 'col' }, label);
   return el(
     'table',
     { className: 'rewards-table' },
-    el('caption', { className: 'visually-hidden' }, 'Rewards by place'),
-    el('thead', null, el('tr', null, el('th', { scope: 'col' }, 'Place'), hasFeeShare && el('th', { scope: 'col' }, 'Base'), hasFeeShare && el('th', { scope: 'col' }, 'Fee share'), el('th', { scope: 'col' }, 'Prize'))),
+    el('caption', { className: 'visually-hidden' }, 'Rewards by place, live pot'),
+    el('thead', null, el('tr', null, th('Place'), split && [th('Base'), th('Fee share')], th('Prize'))),
     el(
       'tbody',
       null,
       rows.map((row) =>
         el(
           'tr',
-          { className: row.first <= 3 ? `podium podium-${row.first}` : '' },
+          { className: row.first <= 3 ? `podium-${row.first}` : '' },
           el('th', { scope: 'row' }, row.first === row.last ? ordinal(row.first) : `${ordinal(row.first)}–${ordinal(row.last)}`),
-          hasFeeShare && el('td', null, formatUsd(row.base)),
-          hasFeeShare && el('td', null, `+${formatUsd(row.feeShare.toFixed(2))}`),
+          split && [el('td', null, formatUsd(row.base)), el('td', null, `+${formatUsd(row.feeShare.toFixed(2))}`)],
           el('td', { className: 'prize-amount' }, formatUsd(row.total), row.last > row.first && el('span', { className: 'muted' }, ' each')),
         ),
       ),
@@ -58,114 +78,80 @@ function buildRewardsTable(bounty) {
 }
 
 function buildDatesList(bounty) {
+  const phaseSpan = (phase) => phase.startsAt && phase.endsAt && `${formatDateTime(phase.startsAt)} → ${formatDateTime(phase.endsAt)}`;
   const items = [
-    ['Opens', bounty.opensAt || bounty.publishedAt],
-    ['Deadline', bounty.deadline],
-    ...(bounty.phases || []).flatMap((phase) => [[phase.title, phase.startsAt && phase.endsAt ? `${formatDateTime(phase.startsAt)} → ${formatDateTime(phase.endsAt)}` : null, true]]),
-    ['Resolved', bounty.resolvedAt],
-  ].filter(([, value]) => value);
-  return el('dl', { className: 'dates-list' }, items.flatMap(([label, value, preformatted]) => [el('dt', null, label), el('dd', null, preformatted ? value : formatDateTime(value))]));
+    ['Opens', formatDateTime(bounty.opensAt || bounty.publishedAt)],
+    ['Deadline', formatDateTime(bounty.deadline)],
+    ...(bounty.phases || []).map((phase) => [phase.title, phaseSpan(phase)]),
+    ['Resolved', bounty.resolvedAt && formatDateTime(bounty.resolvedAt)],
+  ].filter(([, value]) => value && value !== '—');
+  return el('dl', { className: 'dates-list' }, items.flatMap(([label, value]) => [el('dt', null, label), el('dd', null, value)]));
 }
 
 function buildRulesSections(rules) {
-  return splitMarkdownSections(rules).map(({ title, body }, index) =>
-    el('details', { className: 'rules-section', open: index === 0 }, el('summary', null, title || 'Overview'), el('div', { className: 'prose' }, renderMarkdown(body))),
+  return splitMarkdownSections(rules).map(({ title, body }, index) => el('details', { className: 'rules-section', open: index === 0 }, el('summary', null, title || 'Overview'), el('div', { className: 'prose' }, renderMarkdown(body))));
+}
+
+function buildBountyLayout(slug) {
+  const refs = { heading: el('h1', { tabIndex: -1 }), summary: el('p', { className: 'bounty-summary' }), status: el('span', { className: 'status-badge' }), category: el('span', { className: 'tag' }), sponsor: el('span', { className: 'muted' }) };
+  const [pot, fee, time, entries] = [statBlock('Live pot', '', 'stat-pot'), statBlock('Entry fee', '', 'stat-fee'), statBlock('Time left', ''), statBlock('Entries', '')];
+  Object.assign(refs, { pot: pot.valueNode, feeStat: fee.node, fee: fee.valueNode, timeLeft: time.valueNode, entries: entries.valueNode, potNote: el('span', { className: 'stat-note' }) });
+  pot.valueNode.after(refs.potNote);
+  Object.assign(refs, { skills: el('ul', { className: 'skill-list', 'aria-label': 'Skills' }), rewards: el('div', { className: 'table-scroll' }), dates: el('div'), description: el('div', { className: 'prose' }), rules: el('div') });
+  refs.rulesPanel = el('section', { className: 'panel', hidden: true }, el('h2', null, 'Rules'), refs.rules);
+  const panel = (title, body) => el('section', { className: 'panel' }, el('h2', null, title), body);
+  refs.page = el(
+    'article',
+    null,
+    breadcrumb(el('span', null, slug)),
+    el('header', null, el('div', { className: 'bounty-tags' }, refs.status, refs.category, refs.sponsor), refs.heading, refs.summary, refs.skills),
+    el('dl', { className: 'stat-row' }, pot.node, fee.node, time.node, entries.node),
+    el('div', { className: 'bounty-actions' }, el('a', { className: 'button button-primary', href: leaderboardHref(slug) }, 'View leaderboard →'), el('a', { className: 'button', href: `${MAKEFUN_ORIGIN}/bounty/${encodeURIComponent(slug)}`, target: '_blank', rel: 'noopener' }, 'Open on make.fun ↗')),
+    el('div', { className: 'bounty-columns' }, el('div', { className: 'bounty-main' }, panel('Description', refs.description), refs.rulesPanel), el('aside', { className: 'bounty-aside' }, panel('Rewards', refs.rewards), panel('Dates', refs.dates))),
   );
+  return refs;
 }
 
 export async function mountBountyView(container, { slug }, route) {
-  const fromBoard = peekCached(boardPath())?.items?.find((item) => item.slug === slug);
-  const refs = {};
-  let renderedText = { description: null, rules: null, rewards: null, dates: null };
+  const refs = buildBountyLayout(slug);
+  /** What each heavy block was last built from: a refresh rebuilds a block only when its own data changed. */
+  const builtFrom = {};
+  const rebuildIfChanged = (key, source, build) => {
+    const signature = JSON.stringify(source ?? null);
+    if (builtFrom[key] !== signature) build((builtFrom[key] = signature));
+  };
 
-  function ensureLayout() {
-    if (refs.page) return;
-    refs.heading = el('h1', { tabIndex: -1 });
-    refs.summary = el('p', { className: 'bounty-summary' });
-    refs.status = el('span', { className: 'status-badge' });
-    refs.category = el('span', { className: 'tag' });
-    refs.sponsor = el('span', { className: 'muted' });
-    refs.skills = el('ul', { className: 'skill-list', 'aria-label': 'Skills' });
-    const pot = statBlock('Live pot', '', 'stat-pot');
-    const fee = statBlock('Entry fee', '');
-    const time = statBlock('Time left', '');
-    const entries = statBlock('Entries', '');
-    Object.assign(refs, { pot: pot.valueNode, fee: fee.valueNode, timeLeft: time.valueNode, entries: entries.valueNode, potNote: el('span', { className: 'stat-note' }) });
-    pot.valueNode.after(refs.potNote);
-    refs.rewards = el('div', { className: 'table-scroll' });
-    refs.dates = el('div');
-    refs.description = el('div', { className: 'prose' });
-    refs.rules = el('div', { className: 'rules' });
-    refs.rulesPanel = el('section', { className: 'panel', hidden: true, 'aria-labelledby': 'rules-heading' }, el('h2', { id: 'rules-heading' }, 'Rules'), refs.rules);
-    refs.page = el(
-      'article',
-      { className: 'bounty-view' },
-      el('nav', { className: 'breadcrumb', 'aria-label': 'Breadcrumb' }, el('a', { href: '#/' }, 'Bounties'), ' / ', el('span', null, slug)),
-      el('header', { className: 'bounty-header' }, el('div', { className: 'bounty-tags' }, refs.status, refs.category, refs.sponsor), refs.heading, refs.summary, refs.skills),
-      el('dl', { className: 'stat-row', 'data-deadline-scope': '' }, pot.node, fee.node, time.node, entries.node),
-      el(
-        'div',
-        { className: 'bounty-actions' },
-        el('a', { className: 'button button-primary', href: leaderboardHref(slug) }, 'View leaderboard →'),
-        el('a', { className: 'button', href: `${MAKEFUN_ORIGIN}/bounty/${encodeURIComponent(slug)}`, target: '_blank', rel: 'noopener' }, 'Open on make.fun ↗'),
-      ),
-      el(
-        'div',
-        { className: 'bounty-columns' },
-        el('div', { className: 'bounty-main' }, el('section', { className: 'panel', 'aria-labelledby': 'description-heading' }, el('h2', { id: 'description-heading' }, 'Description'), refs.description), refs.rulesPanel),
-        el(
-          'aside',
-          { className: 'bounty-aside' },
-          el('section', { className: 'panel', 'aria-labelledby': 'rewards-heading' }, el('h2', { id: 'rewards-heading' }, 'Rewards'), refs.rewards),
-          el('section', { className: 'panel', 'aria-labelledby': 'dates-heading' }, el('h2', { id: 'dates-heading' }, 'Dates'), refs.dates),
-        ),
-      ),
-    );
-    container.replaceChildren(refs.page);
-  }
-
-  function applyBountyData(bounty) {
-    ensureLayout();
+  function patchBountyInPlace(bounty) {
+    if (!refs.page.isConnected) container.replaceChildren(refs.page);
     document.title = `${bounty.title} · make.fun`;
-    const status = bountyStatusLabel(bounty);
+    const [statusText, tone] = bountyStatusLabel(bounty);
     const fees = livePotUsd(bounty) - Number(bounty.rewardAmount || 0);
     setText(refs.heading, bounty.title);
     setText(refs.summary, bounty.summary || '');
-    setText(refs.status, status.text);
-    refs.status.dataset.tone = status.tone;
+    setText(refs.status, statusText);
+    refs.status.dataset.tone = tone;
     setText(refs.category, bounty.category || 'Bounty');
     setText(refs.sponsor, bounty.sponsor?.name ? `by ${bounty.sponsor.name}` : '');
-    refs.skills.replaceChildren(...(bounty.skills || []).map((skill) => el('li', { className: 'chip chip-static' }, skill)));
     setText(refs.pot, formatUsd(livePotUsd(bounty)));
-    setText(refs.potNote, fees > 0.004 ? `${formatUsd(bounty.rewardAmount)} reward + ${formatUsd(fees.toFixed(2))} fees` : '');
-    setText(refs.fee, entryFeeUsd(bounty) > 0 ? formatUsd(bounty.entryFeeUsd) : 'Free');
+    setText(refs.potNote, fees > 0.004 ? `${formatUsd(bounty.rewardAmount)} reward + ${formatUsd(fees.toFixed(2))} in fees` : '');
+    setText(refs.fee, formatEntryFee(bounty));
+    refs.feeStat.toggleAttribute('data-paid', entryFeeUsd(bounty) > 0);
     if (isTakingEntries(bounty)) trackCountdown(refs.timeLeft, bounty.deadline);
     else setText(refs.timeLeft, 'Closed');
     setText(refs.entries, formatCount(bounty.submissionCount));
-
-    const rewardsKey = JSON.stringify(bounty.rewardsNow || bounty.rewards || null);
-    if (rewardsKey !== renderedText.rewards) {
-      renderedText.rewards = rewardsKey;
-      refs.rewards.replaceChildren(buildRewardsTable(bounty));
-    }
-    const datesKey = JSON.stringify([bounty.opensAt, bounty.deadline, bounty.phases, bounty.resolvedAt]);
-    if (datesKey !== renderedText.dates) {
-      renderedText.dates = datesKey;
-      refs.dates.replaceChildren(buildDatesList(bounty));
-    }
-    if (bounty.description !== renderedText.description) {
-      renderedText.description = bounty.description;
-      refs.description.replaceChildren(renderMarkdown(bounty.description || bounty.summary || ''));
-    }
-    if (bounty.rules && bounty.rules !== renderedText.rules) {
-      renderedText.rules = bounty.rules;
-      refs.rules.replaceChildren(...buildRulesSections(bounty.rules));
-      refs.rulesPanel.hidden = false;
-    }
+    rebuildIfChanged('skills', bounty.skills, () => refs.skills.replaceChildren(...(bounty.skills || []).map((skill) => el('li', { className: 'chip chip-static' }, skill))));
+    rebuildIfChanged('rewards', bounty.rewardsNow || bounty.rewards, () => refs.rewards.replaceChildren(buildRewardsTable(bounty)));
+    rebuildIfChanged('dates', [bounty.opensAt, bounty.deadline, bounty.phases, bounty.resolvedAt], () => refs.dates.replaceChildren(buildDatesList(bounty)));
+    rebuildIfChanged('description', bounty.description, () => refs.description.replaceChildren(renderMarkdown(bounty.description || bounty.summary || '')));
+    if (bounty.rules) rebuildIfChanged('rules', bounty.rules, () => refs.rules.replaceChildren(...buildRulesSections(bounty.rules)));
+    refs.rulesPanel.hidden = !bounty.rules;
   }
 
-  if (fromBoard) applyBountyData(fromBoard);
-  const bounty = await readCached(bountyPath(slug), (fresh) => route.isCurrent() && applyBountyData(fresh));
+  const fromBoard = peekCached(apiPaths.board())?.items?.find((item) => item.slug === slug);
+  if (fromBoard) patchBountyInPlace(fromBoard);
+  const onChange = (fresh) => route.isCurrent() && patchBountyInPlace(fresh);
+  const bounty = await readCached(apiPaths.bounty({ slug }), onChange);
   if (!route.isCurrent()) return;
-  applyBountyData(bounty);
+  patchBountyInPlace(bounty);
+  return revalidateWhileVisible(apiPaths.bounty({ slug }), onChange);
 }

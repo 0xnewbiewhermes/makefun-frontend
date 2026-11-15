@@ -2,8 +2,18 @@
 // paragraphs, bullet and numbered lists, fenced code, block quotes, tables, and inline code, bold, italics and links.
 // Links keep only https:, http: and make.fun-relative targets.
 
-import { MAKEFUN_ORIGIN } from './api.js';
-import { el } from './ui.js';
+import { adoptViewStyles, el, MAKEFUN_ORIGIN } from './app.js';
+
+adoptViewStyles(`
+.prose{overflow-wrap:break-word}
+.prose>:first-child{margin-top:0}
+.prose p,.md-list{max-width:78ch}
+.md-heading{margin-top:1.2em;font-size:1.05rem}
+.prose code{padding:1px 5px;border-radius:6px;background:var(--surface-2);font-family:var(--mono);font-size:.86em}
+.md-code{padding:12px;overflow-x:auto;border-radius:6px;background:var(--surface-2);font-size:.86em}
+.md-code code{padding:0;background:none;font-size:1em}
+.prose blockquote{margin:0;padding-left:12px;border-left:3px solid var(--border);color:var(--muted)}
+`);
 
 const INLINE_PATTERN = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\[[^\]]+\]\([^)\s]+\))|(https:\/\/[^\s)<>"]+[^\s)<>".,;:!?])|(\*[^*\s][^*]*\*)/g;
 

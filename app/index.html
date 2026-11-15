@@ -7,21 +7,100 @@
 <meta name="description" content="A fast, read-only make.fun frontend: live bounties, bounty pages, leaderboards and profiles.">
 <title>Live bounties · make.fun</title>
 <link rel="preconnect" href="https://make.fun" crossorigin>
-<link rel="stylesheet" href="style.css">
-<script type="module" src="main.js"></script>
+<style>
+:root{--bg:#f5f6f8;--surface:#fff;--surface-2:#eceef3;--text:#12141a;--muted:#555c6b;--border:#d9dde5;--accent:#5b3df5;--on-accent:#fff;--accent-soft:#ece8ff;--money:#087a40;--money-soft:#e2f4e9;--soon:#a35400;--urgent:#c0262d;--gold:#a87b05;--focus:#1f6feb;--radius:12px;--shadow:0 1px 3px rgb(16 24 40/9%);--mono:ui-monospace,Consolas,monospace;color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--bg:#0d0f14;--surface:#171a21;--surface-2:#21252e;--text:#eef0f4;--muted:#a3aab8;--border:#2d323d;--accent:#9483ff;--on-accent:#0d0f14;--accent-soft:#272046;--money:#4fd890;--money-soft:#14301f;--soon:#ffb054;--urgent:#ff6f6f;--gold:#f0c24c;--focus:#6ea8ff;--shadow:none;color-scheme:dark}}
+*,::before,::after{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:flex;flex-direction:column;background:var(--bg);color:var(--text);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-text-size-adjust:100%}
+a{color:var(--accent);text-underline-offset:2px}
+:focus-visible{outline:3px solid var(--focus);outline-offset:2px;border-radius:4px}
+h1,h2,h3{line-height:1.2;margin:0 0 .5rem}
+h1{font-size:clamp(1.6rem,1.2rem + 1.6vw,2.2rem);letter-spacing:-.02em}
+h2{font-size:1.15rem}
+h1:focus,.view:focus{outline:none}
+.visually-hidden{position:absolute!important;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.skip-link{position:absolute;left:8px;top:-48px;z-index:10;padding:8px 12px;border-radius:8px;background:var(--accent);color:var(--on-accent)}
+.skip-link:focus{top:8px}
+.muted{color:var(--muted)}
+.small{font-size:.85rem}
+.site-header{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--surface) 90%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--border)}
+.site-nav,.view{width:100%;max-width:1200px;margin:0 auto;padding:10px 16px}
+.site-nav{display:flex;align-items:center;gap:18px}
+.brand{display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:1.1rem;color:var(--text);text-decoration:none}
+.brand-mark{display:inline-grid;place-items:center;width:28px;height:28px;border-radius:8px;background:var(--accent);color:var(--on-accent)}
+.nav-link{padding:6px 2px;border-bottom:2px solid transparent;color:var(--muted);font-weight:600;text-decoration:none}
+.nav-link[aria-current=page]{color:var(--text);border-bottom-color:var(--accent)}
+.profile-search{margin-left:auto;display:flex;gap:6px}
+.profile-search .input{width:11rem}
+.view{flex:1;padding:22px 16px 48px}
+.site-footer{padding:16px;border-top:1px solid var(--border);color:var(--muted);font-size:.85rem;text-align:center}
+.input,.button,.chip{font:inherit;color:var(--text);background:var(--surface);border:1px solid var(--border)}
+.input{min-height:40px;padding:7px 10px;border-radius:8px;font-size:.95rem}
+.button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:40px;padding:7px 14px;border-radius:8px;font-size:.95rem;font-weight:600;text-decoration:none;cursor:pointer}
+.button:hover{border-color:var(--accent)}
+.button:disabled{opacity:.45;cursor:default}
+.button-primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.view-heading{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:4px 16px;margin-bottom:14px}
+.board-totals{margin:0;color:var(--muted);font-size:1.05rem}
+.board-totals strong{color:var(--text);font-variant-numeric:tabular-nums}
+.board-toolbar{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+.board-toolbar [type=search]{flex:1 1 240px}
+.category-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:999px;font-size:.88rem;font-weight:600;cursor:pointer}
+.chip[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.chip-count{opacity:.75;font-variant-numeric:tabular-nums}
+.board-result-count{margin:0 0 8px;color:var(--muted)}
+.board-result-count:empty{display:none}
+.bounty-grid{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px}
+.bounty-card{position:relative;display:flex;flex-direction:column;gap:6px;padding:14px 16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow)}
+.bounty-card:hover,.bounty-card:focus-within{border-color:var(--accent)}
+.card-top,.card-money,.card-meta{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.card-category,.tag{padding:2px 8px;border-radius:6px;background:var(--accent-soft);color:var(--accent);font-size:.75rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
+.card-sponsor{color:var(--muted);font-size:.85rem}
+.card-title{margin:0;font-size:1.12rem}
+.card-title-link{color:var(--text);text-decoration:none}
+.card-title-link::after{content:"";position:absolute;inset:0;border-radius:var(--radius)}
+.card-title-link:focus-visible{outline:none}
+.card-title-link:focus-visible::after{outline:3px solid var(--focus);outline-offset:2px}
+.card-summary{margin:0;color:var(--muted);font-size:.9rem;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.card-money{margin-top:auto;padding-top:4px}
+.card-label{display:block;color:var(--muted);font-size:.78rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase}
+.card-pot-amount{font-size:2.3rem;line-height:1.1;font-weight:850;color:var(--money);letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.card-clock{text-align:right}
+.card-time-left{font-size:1.4rem;font-weight:800;font-variant-numeric:tabular-nums}
+.card-meta{padding-top:8px;border-top:1px solid var(--border);font-size:.98rem;color:var(--muted)}
+.card-meta strong{color:var(--text);font-variant-numeric:tabular-nums}
+.card-fee[data-paid] strong{color:var(--accent)}
+.card-pot-note{color:var(--muted);font-size:.85rem}
+.card-pot-note:empty{display:none}
+[data-urgency=is-soon]{color:var(--soon)}
+[data-urgency=is-urgent]{color:var(--urgent)}
+.empty-state{padding:32px 16px;border:1px dashed var(--border);border-radius:var(--radius);background:var(--surface);color:var(--muted);text-align:center}
+.error-state{max-width:560px;margin:40px auto;padding:32px 24px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);text-align:center}
+.error-actions{display:flex;justify-content:center;gap:8px;margin-top:16px}
+.skeleton-view{display:grid;gap:14px}
+.skeleton{min-height:38px;border-radius:var(--radius);background:linear-gradient(90deg,var(--surface-2) 25%,var(--surface) 50%,var(--surface-2) 75%) 0 0/200% 100%;animation:shimmer 1.3s linear infinite}
+.skeleton-title{width:min(420px,70%)}
+.skeleton-card{height:200px}
+.skeleton-block{height:200px}
+@keyframes shimmer{to{background-position:-200% 0}}
+@media (prefers-reduced-motion:reduce){.skeleton{animation:none}}
+@media (max-width:640px){.site-nav{flex-wrap:wrap;gap:8px 14px}.profile-search{flex:1 1 100%}.profile-search .input{flex:1;width:auto}.bounty-grid{grid-template-columns:1fr}.card-pot-amount{font-size:2rem}.card-time-left{font-size:1.2rem}}
+</style>
+<script type="module" src="app.js"></script>
 </head>
 <body>
 <a class="skip-link" href="#view">Skip to content</a>
 <header class="site-header">
-  <nav class="site-nav" aria-label="Main">
-    <a class="brand" href="#/"><span class="brand-mark" aria-hidden="true">m</span>make.fun <span class="brand-sub">board</span></a>
-    <a class="nav-link" href="#/" data-nav="board">Bounties</a>
-    <form id="profile-search" class="profile-search" role="search">
-      <label class="visually-hidden" for="profile-handle">Find a profile by handle</label>
-      <input id="profile-handle" class="input" name="handle" placeholder="Find @handle" autocomplete="off" spellcheck="false">
-      <button class="button" type="submit">Go</button>
-    </form>
-  </nav>
+<nav class="site-nav" aria-label="Main">
+<a class="brand" href="#/"><span class="brand-mark" aria-hidden="true">m</span>make.fun</a>
+<a class="nav-link" href="#/" data-nav="board">Bounties</a>
+<form id="profile-search" class="profile-search" role="search">
+<label class="visually-hidden" for="profile-handle">Find a profile by handle</label>
+<input id="profile-handle" class="input" name="handle" placeholder="Find @handle" autocomplete="off" spellcheck="false">
+<button class="button" type="submit">Go</button>
+</form>
+</nav>
 </header>
 <main id="view" class="view" tabindex="-1"></main>
 <footer class="site-footer">Live data from the <a href="https://make.fun/api/openapi.json">make.fun public API</a> · read-only</footer>
