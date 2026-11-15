@@ -3,55 +3,6 @@
 // Links keep only https:, http: and make.fun-relative targets.
 
 import { adoptViewStyles, el, MAKEFUN_ORIGIN } from './app.js';
-
-adoptViewStyles(`
-.prose{overflow-wrap:break-word}
-.prose>:first-child{margin-top:0}
-.prose p,.md-list{max-width:78ch}
-.md-heading{margin-top:1.2em;font-size:1.05rem}
-.prose code{padding:1px 5px;border-radius:6px;background:var(--surface-2);font-family:var(--mono);font-size:.86em}
-.md-code{padding:12px;overflow-x:auto;border-radius:6px;background:var(--surface-2);font-size:.86em}
-.md-code code{padding:0;background:none;font-size:1em}
-.prose blockquote{margin:0;padding-left:12px;border-left:3px solid var(--border);color:var(--muted)}
-`);
-
-const INLINE_PATTERN = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\[[^\]]+\]\([^)\s]+\))|(https:\/\/[^\s)<>"]+[^\s)<>".,;:!?])|(\*[^*\s][^*]*\*)/g;
-
-function safeLinkTarget(target) {
-  if (target.startsWith('/')) return MAKEFUN_ORIGIN + target;
-  return /^https?:\/\//i.test(target) ? target : null;
-}
-
-function externalLink(href, text) {
-  return el('a', { href, target: '_blank', rel: 'noopener noreferrer' }, text);
-}
-
-/** Inline Markdown of one line or paragraph as an array of nodes and strings. */
-export function renderInlineMarkdown(text) {
-  const output = [];
-  let last = 0;
-  for (const match of text.matchAll(INLINE_PATTERN)) {
-    if (match.index > last) output.push(text.slice(last, match.index));
-    const [token, code, bold, link, bareUrl, italic] = match;
-    if (code) output.push(el('code', null, code.slice(1, -1)));
-    else if (bold) output.push(el('strong', null, renderInlineMarkdown(bold.slice(2, -2))));
-    else if (link) {
-      const [, label, target] = link.match(/^\[([^\]]+)\]\(([^)\s]+)\)$/);
-      const href = safeLinkTarget(target);
-      output.push(href ? externalLink(href, renderInlineMarkdown(label)) : label);
-    } else if (bareUrl) output.push(externalLink(bareUrl, bareUrl));
-    else if (italic) output.push(el('em', null, italic.slice(1, -1)));
-    else output.push(token);
-    last = match.index + token.length;
-  }
-  if (last < text.length) output.push(text.slice(last));
-  return output;
-}
-
-const isTableRow = (line) => /^\s*\|.*\|\s*$/.test(line);
-const tableCells = (line) => line.trim().slice(1, -1).split('|').map((cell) => cell.trim());
-const BLOCK_START = /^(#{1,6}\s|```|>\s?|\s*[-*+]\s|\s*\d+[.)]\s)/;
-
 /** Block Markdown as a DocumentFragment. */
 export function renderMarkdown(source) {
   const fragment = document.createDocumentFragment();
@@ -119,3 +70,51 @@ export function splitMarkdownSections(source) {
   sections.push(current);
   return sections.map(({ title, lines }) => ({ title, body: lines.join('\n') }));
 }
+
+const INLINE_PATTERN = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\[[^\]]+\]\([^)\s]+\))|(https:\/\/[^\s)<>"]+[^\s)<>".,;:!?])|(\*[^*\s][^*]*\*)/g;
+
+function safeLinkTarget(target) {
+  if (target.startsWith('/')) return MAKEFUN_ORIGIN + target;
+  return /^https?:\/\//i.test(target) ? target : null;
+}
+
+function externalLink(href, text) {
+  return el('a', { href, target: '_blank', rel: 'noopener noreferrer' }, text);
+}
+
+/** Inline Markdown of one line or paragraph as an array of nodes and strings. */
+export function renderInlineMarkdown(text) {
+  const output = [];
+  let last = 0;
+  for (const match of text.matchAll(INLINE_PATTERN)) {
+    if (match.index > last) output.push(text.slice(last, match.index));
+    const [token, code, bold, link, bareUrl, italic] = match;
+    if (code) output.push(el('code', null, code.slice(1, -1)));
+    else if (bold) output.push(el('strong', null, renderInlineMarkdown(bold.slice(2, -2))));
+    else if (link) {
+      const [, label, target] = link.match(/^\[([^\]]+)\]\(([^)\s]+)\)$/);
+      const href = safeLinkTarget(target);
+      output.push(href ? externalLink(href, renderInlineMarkdown(label)) : label);
+    } else if (bareUrl) output.push(externalLink(bareUrl, bareUrl));
+    else if (italic) output.push(el('em', null, italic.slice(1, -1)));
+    else output.push(token);
+    last = match.index + token.length;
+  }
+  if (last < text.length) output.push(text.slice(last));
+  return output;
+}
+
+const isTableRow = (line) => /^\s*\|.*\|\s*$/.test(line);
+const tableCells = (line) => line.trim().slice(1, -1).split('|').map((cell) => cell.trim());
+const BLOCK_START = /^(#{1,6}\s|```|>\s?|\s*[-*+]\s|\s*\d+[.)]\s)/;
+
+adoptViewStyles(`
+.prose{overflow-wrap:break-word}
+.prose>:first-child{margin-top:0}
+.prose p,.md-list{max-width:78ch}
+.md-heading{margin-top:1.2em;font-size:1.05rem}
+.prose code{padding:1px 5px;border-radius:6px;background:var(--surface-2);font-family:var(--mono);font-size:.86em}
+.md-code{padding:12px;overflow-x:auto;border-radius:6px;background:var(--surface-2);font-size:.86em}
+.md-code code{padding:0;background:none;font-size:1em}
+.prose blockquote{margin:0;padding-left:12px;border-left:3px solid var(--border);color:var(--muted)}
+`);

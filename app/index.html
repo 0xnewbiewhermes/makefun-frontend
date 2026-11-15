@@ -19,8 +19,6 @@ h1{font-size:clamp(1.6rem,1.2rem + 1.6vw,2.2rem);letter-spacing:-.02em}
 h2{font-size:1.15rem}
 h1:focus,.view:focus{outline:none}
 .visually-hidden{position:absolute!important;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
-.skip-link{position:absolute;left:8px;top:-48px;z-index:10;padding:8px 12px;border-radius:8px;background:var(--accent);color:var(--on-accent)}
-.skip-link:focus{top:8px}
 .muted{color:var(--muted)}
 .small{font-size:.85rem}
 .site-header{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--surface) 90%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--border)}
@@ -90,19 +88,17 @@ h1:focus,.view:focus{outline:none}
 <script type="module" src="app.js"></script>
 </head>
 <body>
-<a class="skip-link" href="#view">Skip to content</a>
 <header class="site-header">
 <nav class="site-nav" aria-label="Main">
 <a class="brand" href="#/"><span class="brand-mark" aria-hidden="true">m</span>make.fun</a>
 <a class="nav-link" href="#/" data-nav="board">Bounties</a>
-<form id="profile-search" class="profile-search" role="search">
-<label class="visually-hidden" for="profile-handle">Find a profile by handle</label>
-<input id="profile-handle" class="input" name="handle" placeholder="Find @handle" autocomplete="off" spellcheck="false">
+<form class="profile-search" role="search">
+<input class="input" name="handle" aria-label="Find a profile by handle" placeholder="Find @handle" autocomplete="off" spellcheck="false">
 <button class="button" type="submit">Go</button>
 </form>
 </nav>
 </header>
-<main id="view" class="view" tabindex="-1"></main>
+<main class="view" tabindex="-1"></main>
 <footer class="site-footer">Live data from the <a href="https://make.fun/api/openapi.json">make.fun public API</a> · read-only</footer>
 </body>
 </html>

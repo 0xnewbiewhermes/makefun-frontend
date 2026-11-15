@@ -1,19 +1,7 @@
 // First load: make.fun API behind an ETag cache, the board (#/), the router; other views are import()ed on demand.
+// The functions that do the work come first; the constants and small helpers they use follow.
 
-export const MAKEFUN_ORIGIN = 'https://make.fun';
-const FRESH_FOR_MS = 20_000;
-const REVALIDATE_EVERY_MS = 60_000;
-
-const responseCache = new Map();
-const inflightRequests = new Map();
-
-export class ApiError extends Error {
-  constructor(status) {
-    super(status === 404 ? 'Not found on make.fun' : `make.fun answered ${status || 'no response'}`);
-    this.status = status;
-  }
-}
-
+/** GET with If-None-Match. A 304, or a 200 with the same body (tags turn every minute), reports changed: false. */
 async function readCachedWithEtag(path) {
   const cached = responseCache.get(path);
   const headers = cached?.etag ? { 'if-none-match': cached.etag } : {};
@@ -36,6 +24,112 @@ async function readCachedWithEtag(path) {
   return { data, changed: true };
 }
 
+export function revalidateWhileVisible(path, onChange) {
+  const revalidate = () => document.visibilityState === 'visible' && revalidateOnce(path).then((r) => r.changed && onChange(r.data), () => {});
+  const timer = setInterval(revalidate, REVALIDATE_EVERY_MS);
+  document.addEventListener('visibilitychange', revalidate);
+  return () => {
+    clearInterval(timer);
+    document.removeEventListener('visibilitychange', revalidate);
+  };
+}
+
+function patchBoardCardsInPlace(list, cards) {
+  cards.forEach((card, index) => list.children[index] !== card && list.insertBefore(card, list.children[index] || null));
+  while (list.children.length > cards.length) list.lastElementChild.remove();
+}
+
+function tickCountdownsInPlace() {
+  for (const [node, deadline] of countdowns.nodes) {
+    if (!node.isConnected) continue;
+    setText(node, formatTimeLeft(deadline));
+    const urgency = deadlineUrgency(deadline);
+    if (node.dataset.urgency !== urgency) node.dataset.urgency = urgency;
+  }
+}
+
+async function mountBoardView(container, _params, route) {
+  document.title = 'Live bounties · make.fun';
+  let liveBounties = [];
+  const totals = { live: el('strong'), pots: el('strong'), entries: el('strong') };
+  const list = el('ul', { className: 'bounty-grid' });
+  const resultCount = el('p', { className: 'board-result-count', 'aria-live': 'polite' });
+  const emptyState = el('p', { className: 'empty-state', hidden: true }, 'No live bounty matches. Clear the search or pick another category.');
+  const { toolbar, chips } = buildBoardToolbar(applyBoardFilters);
+
+  function applyBoardFilters() {
+    renderCategoryChips(chips, liveBounties);
+    const visible = liveBounties
+      .filter((bounty) => boardFilters.category === 'all' || (bounty.category || 'Other') === boardFilters.category)
+      .filter((bounty) => !boardFilters.query || matchesSearch(bounty, boardFilters.query))
+      .sort(BOARD_SORTS[boardFilters.sort][1]);
+    patchBoardCardsInPlace(list, visible.map((bounty) => bountyCards.get(bounty.slug).card));
+    emptyState.hidden = visible.length > 0;
+    setText(resultCount, visible.length === liveBounties.length ? '' : `Showing ${visible.length} of ${liveBounties.length}`);
+  }
+
+  function applyBoardData(data) {
+    liveBounties = (data.items || []).filter(isTakingEntries);
+    for (const bounty of liveBounties) {
+      if (!bountyCards.has(bounty.slug)) bountyCards.set(bounty.slug, createBountyCard(bounty.slug));
+      fillBountyCard(bountyCards.get(bounty.slug), bounty);
+    }
+    setText(totals.live, `${liveBounties.length} ${liveBounties.length === 1 ? 'bounty' : 'bounties'}`);
+    setText(totals.pots, formatUsd(Math.round(liveBounties.reduce((sum, b) => sum + livePotUsd(b), 0))));
+    setText(totals.entries, formatCount(liveBounties.reduce((sum, b) => sum + (b.submissionCount || 0), 0)));
+    applyBoardFilters();
+  }
+
+  const onChange = (fresh) => route.isCurrent() && applyBoardData(fresh);
+  const data = await readCached(apiPaths.board(), onChange);
+  if (!route.isCurrent()) return;
+  const summary = el('p', { className: 'board-totals' }, totals.live, ' taking entries · ', totals.pots, ' in live pots · ', totals.entries, ' entries');
+  container.replaceChildren(el('section', null, el('div', { className: 'view-heading' }, el('h1', { tabIndex: -1 }, 'Live bounties'), summary), toolbar, chips, resultCount, list, emptyState));
+  applyBoardData(data);
+  return revalidateWhileVisible(apiPaths.board(), onChange);
+}
+
+async function renderCurrentRoute() {
+  const generation = ++activeRoute.generation;
+  const isFirstRender = generation === 1;
+  window.__shotReady = false;
+  activeRoute.unmount?.();
+  activeRoute.unmount = null;
+  stopAllCountdowns();
+  const { name, params } = parseHashRoute(location.hash);
+  for (const link of document.querySelectorAll('[data-nav]')) {
+    if (link.dataset.nav === name) link.setAttribute('aria-current', 'page');
+    else link.removeAttribute('aria-current');
+  }
+  viewRoot.replaceChildren(renderSkeleton(name));
+  if (!isFirstRender) scrollTo(0, 0);
+  const route = { isCurrent: () => generation === activeRoute.generation };
+  readCached(apiPaths[name](params)).catch(() => {});
+  try {
+    const unmount = await (await ROUTES[name]())(viewRoot, params, route);
+    if (!route.isCurrent()) return unmount?.();
+    activeRoute.unmount = unmount || null;
+  } catch (error) {
+    if (!route.isCurrent()) return;
+    viewRoot.replaceChildren(renderErrorState(error, renderCurrentRoute));
+  }
+  if (!isFirstRender) viewRoot.querySelector('h1')?.focus({ preventScroll: true });
+  window.__shotReady = true;
+}
+
+export const MAKEFUN_ORIGIN = 'https://make.fun';
+const FRESH_FOR_MS = 20_000;
+const REVALIDATE_EVERY_MS = 60_000;
+const responseCache = new Map();
+const inflightRequests = new Map();
+
+class ApiError extends Error {
+  constructor(status) {
+    super(status === 404 ? 'Not found on make.fun' : `make.fun answered ${status || 'no response'}`);
+    this.status = status;
+  }
+}
+
 function revalidateOnce(path) {
   if (!inflightRequests.has(path)) inflightRequests.set(path, readCachedWithEtag(path).finally(() => inflightRequests.delete(path)));
   return inflightRequests.get(path);
@@ -46,16 +140,6 @@ export function readCached(path, onChange) {
   if (!cached) return revalidateOnce(path).then((result) => result.data);
   if (Date.now() - cached.fetchedAt > FRESH_FOR_MS) revalidateOnce(path).then((r) => r.changed && onChange?.(r.data), () => {});
   return Promise.resolve(cached.data);
-}
-
-export function revalidateWhileVisible(path, onChange) {
-  const revalidate = () => document.visibilityState === 'visible' && revalidateOnce(path).then((r) => r.changed && onChange(r.data), () => {});
-  const timer = setInterval(revalidate, REVALIDATE_EVERY_MS);
-  document.addEventListener('visibilitychange', revalidate);
-  return () => {
-    clearInterval(timer);
-    document.removeEventListener('visibilitychange', revalidate);
-  };
 }
 
 export const peekCached = (path) => responseCache.get(path)?.data;
@@ -97,18 +181,15 @@ export function adoptViewStyles(cssText) {
   document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
 }
 
-const usd = (digits) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: digits, maximumFractionDigits: digits });
-const usdWhole = usd(0);
-const usdCents = usd(2);
+const USD_FORMATS = [0, 2].map((digits) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: digits, maximumFractionDigits: digits }));
 
 export function formatUsd(value) {
   const amount = Number(value);
   if (!Number.isFinite(amount)) return '—';
-  return (Number.isInteger(amount) ? usdWhole : usdCents).format(amount);
+  return USD_FORMATS[Number.isInteger(amount) ? 0 : 1].format(amount);
 }
 
 export const formatCount = (n) => (Number(n) || 0).toLocaleString('en-US');
-const pluralize = (n, one, many) => `${formatCount(n)} ${Number(n) === 1 ? one : many}`;
 export const livePotUsd = (bounty) => Number(bounty.potUsd ?? bounty.rewardAmount ?? 0);
 export const entryFeeUsd = (bounty) => Number(bounty.entryFeeUsd || 0);
 export const formatEntryFee = (bounty) => (entryFeeUsd(bounty) > 0 ? formatUsd(bounty.entryFeeUsd) : 'Free');
@@ -130,29 +211,19 @@ function deadlineUrgency(deadline) {
   return ms <= 0 ? 'is-closed' : ms < 3_600_000 ? 'is-urgent' : ms < 86_400_000 ? 'is-soon' : '';
 }
 
-const liveCountdowns = new Map();
-let countdownTimer = 0;
-
-function tickCountdownsInPlace() {
-  for (const [node, deadline] of liveCountdowns) {
-    if (!node.isConnected) continue;
-    setText(node, formatTimeLeft(deadline));
-    const urgency = deadlineUrgency(deadline);
-    if (node.dataset.urgency !== urgency) node.dataset.urgency = urgency;
-  }
-}
+const countdowns = { nodes: new Map(), timer: 0 };
 
 export function trackCountdown(node, deadline) {
-  liveCountdowns.set(node, deadline);
+  countdowns.nodes.set(node, deadline);
   setText(node, formatTimeLeft(deadline));
   node.dataset.urgency = deadlineUrgency(deadline);
-  countdownTimer ||= setInterval(tickCountdownsInPlace, 1000);
+  countdowns.timer ||= setInterval(tickCountdownsInPlace, 1000);
 }
 
 function stopAllCountdowns() {
-  liveCountdowns.clear();
-  clearInterval(countdownTimer);
-  countdownTimer = 0;
+  countdowns.nodes.clear();
+  clearInterval(countdowns.timer);
+  countdowns.timer = 0;
 }
 
 export const bountyHref = (slug) => `#/bounty/${encodeURIComponent(slug)}`;
@@ -204,11 +275,6 @@ function matchesSearch(bounty, query) {
   return query.split(/\s+/).every((word) => haystack.includes(word));
 }
 
-function patchBoardCardsInPlace(list, cards) {
-  cards.forEach((card, index) => list.children[index] !== card && list.insertBefore(card, list.children[index] || null));
-  while (list.children.length > cards.length) list.lastElementChild.remove();
-}
-
 function buildBoardToolbar(onChange) {
   const search = el('input', { type: 'search', className: 'input', placeholder: 'Search bounties, skills…', 'aria-label': 'Search bounties', value: boardFilters.query });
   const sort = el('select', { className: 'input', 'aria-label': 'Sort bounties' }, Object.entries(BOARD_SORTS).map(([key, [label]]) => el('option', { value: key }, label)));
@@ -231,59 +297,16 @@ function renderCategoryChips(container, bounties) {
   container.replaceChildren(chip('all', bounties.length), ...[...counts].sort((a, b) => b[1] - a[1]).map(([name, count]) => chip(name, count)));
 }
 
-async function mountBoardView(container, _params, route) {
-  document.title = 'Live bounties · make.fun';
-  let liveBounties = [];
-  const totals = { live: el('strong'), pots: el('strong'), entries: el('strong') };
-  const list = el('ul', { className: 'bounty-grid' });
-  const resultCount = el('p', { className: 'board-result-count', 'aria-live': 'polite' });
-  const emptyState = el('p', { className: 'empty-state', hidden: true }, 'No live bounty matches. Clear the search or pick another category.');
-  const { toolbar, chips } = buildBoardToolbar(applyBoardFilters);
-
-  function applyBoardFilters() {
-    renderCategoryChips(chips, liveBounties);
-    const visible = liveBounties
-      .filter((bounty) => boardFilters.category === 'all' || (bounty.category || 'Other') === boardFilters.category)
-      .filter((bounty) => !boardFilters.query || matchesSearch(bounty, boardFilters.query))
-      .sort(BOARD_SORTS[boardFilters.sort][1]);
-    patchBoardCardsInPlace(list, visible.map((bounty) => bountyCards.get(bounty.slug).card));
-    emptyState.hidden = visible.length > 0;
-    setText(resultCount, visible.length === liveBounties.length ? '' : `Showing ${visible.length} of ${liveBounties.length}`);
-  }
-
-  function applyBoardData(data) {
-    liveBounties = (data.items || []).filter(isTakingEntries);
-    for (const bounty of liveBounties) {
-      if (!bountyCards.has(bounty.slug)) bountyCards.set(bounty.slug, createBountyCard(bounty.slug));
-      fillBountyCard(bountyCards.get(bounty.slug), bounty);
-    }
-    setText(totals.live, pluralize(liveBounties.length, 'bounty', 'bounties'));
-    setText(totals.pots, formatUsd(Math.round(liveBounties.reduce((sum, b) => sum + livePotUsd(b), 0))));
-    setText(totals.entries, formatCount(liveBounties.reduce((sum, b) => sum + (b.submissionCount || 0), 0)));
-    applyBoardFilters();
-  }
-
-  const onChange = (fresh) => route.isCurrent() && applyBoardData(fresh);
-  const data = await readCached(apiPaths.board(), onChange);
-  if (!route.isCurrent()) return;
-  const summary = el('p', { className: 'board-totals' }, totals.live, ' taking entries · ', totals.pots, ' in live pots · ', totals.entries, ' entries');
-  container.replaceChildren(el('section', null, el('div', { className: 'view-heading' }, el('h1', { tabIndex: -1 }, 'Live bounties'), summary), toolbar, chips, resultCount, list, emptyState));
-  applyBoardData(data);
-  return revalidateWhileVisible(apiPaths.board(), onChange);
-}
-
 const ROUTES = {
   board: async () => mountBoardView,
   bounty: async () => (await import('./bounty-view.js')).mountBountyView,
   leaderboard: async () => (await import('./leaderboard-view.js')).mountLeaderboardView,
   profile: async () => (await import('./profile-view.js')).mountProfileView,
 };
+const viewRoot = document.querySelector('main');
+const activeRoute = { generation: 0, unmount: null };
 
-const viewRoot = document.getElementById('view');
-let routeGeneration = 0;
-let unmountActiveView = null;
-
-export function parseHashRoute(hash) {
+function parseHashRoute(hash) {
   const parts = hash.replace(/^#\/?/, '').split('?')[0].split('/').filter(Boolean).map(decodeURIComponent);
   if (parts[0] === 'bounty' && parts[1]) return { name: parts[2] === 'leaderboard' ? 'leaderboard' : 'bounty', params: { slug: parts[1] } };
   if (parts[0] === 'u' && parts[1]) return { name: 'profile', params: { handle: parts[1].replace(/^@/, '') } };
@@ -307,41 +330,13 @@ function renderErrorState(error, retry) {
   );
 }
 
-async function renderCurrentRoute() {
-  const generation = ++routeGeneration;
-  const isFirstRender = generation === 1;
-  window.__shotReady = false;
-  unmountActiveView?.();
-  unmountActiveView = null;
-  stopAllCountdowns();
-  const { name, params } = parseHashRoute(location.hash);
-  for (const link of document.querySelectorAll('[data-nav]')) {
-    if (link.dataset.nav === name) link.setAttribute('aria-current', 'page');
-    else link.removeAttribute('aria-current');
-  }
-  viewRoot.replaceChildren(renderSkeleton(name));
-  if (!isFirstRender) scrollTo(0, 0);
-  const route = { isCurrent: () => generation === routeGeneration };
-  readCached(apiPaths[name](params)).catch(() => {});
-  try {
-    const unmount = await (await ROUTES[name]())(viewRoot, params, route);
-    if (!route.isCurrent()) return unmount?.();
-    unmountActiveView = unmount || null;
-  } catch (error) {
-    if (!route.isCurrent()) return;
-    viewRoot.replaceChildren(renderErrorState(error, renderCurrentRoute));
-  }
-  if (!isFirstRender) viewRoot.querySelector('h1')?.focus({ preventScroll: true });
-  window.__shotReady = true;
-}
-
 function warmLaterViewsWhenIdle() {
   const warm = () => Promise.all([ROUTES.bounty(), ROUTES.leaderboard(), ROUTES.profile()]).catch(() => {});
   if ('requestIdleCallback' in window) requestIdleCallback(warm, { timeout: 4000 });
   else setTimeout(warm, 2500);
 }
 
-document.getElementById('profile-search').addEventListener('submit', (event) => {
+document.querySelector('.profile-search').addEventListener('submit', (event) => {
   event.preventDefault();
   const handle = new FormData(event.target).get('handle').trim().replace(/^@/, '');
   if (handle) location.hash = profileHref(handle);

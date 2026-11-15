@@ -6,40 +6,11 @@ import { absoluteAssetUrl, avatarImage, breadcrumb, formatDate, formatDateTime, 
 
 const SOLUTIONS_PAGE_SIZE = 25;
 
-adoptViewStyles(`
-.profile-header{display:flex;gap:20px;align-items:flex-start;margin-bottom:20px}
-.profile-identity{min-width:0}
-.profile-identity h1{margin-bottom:2px;overflow-wrap:anywhere}
-.profile-bio{max-width:70ch;margin:8px 0}
-.profile-links{display:flex;flex-wrap:wrap;gap:4px 16px;margin:0;padding:0;list-style:none;font-size:.9rem}
-.solutions-table .col-score{font-weight:800;white-space:nowrap}
-.solutions-table .prize{color:var(--money);font-weight:800}
-.show-more{margin-top:12px}
-@media (max-width:640px){.profile-stats{grid-template-columns:repeat(3,minmax(0,1fr))}.profile-header{gap:14px}.profile-header .avatar{--avatar-size:64px!important;width:64px;height:64px}.solutions-table .col-title,.solutions-table .col-received{display:none}}
-`);
-
-function profileLinks(profile) {
-  const links = [];
-  if (profile.github_login) links.push(['GitHub', `https://github.com/${encodeURIComponent(profile.github_login)}`, profile.github_login]);
-  if (profile.x?.url) links.push(['X', profile.x.url, `@${profile.x.username}`]);
-  if (profile.discord?.url) links.push(['Discord', profile.discord.url, profile.discord.global_name || profile.discord.username]);
-  if (profile.wallet?.explorer_url) links.push(['Wallet', profile.wallet.explorer_url, `${profile.wallet.address.slice(0, 4)}…${profile.wallet.address.slice(-4)}`]);
-  return links.filter(([, href]) => /^https:\/\//.test(href));
-}
-
-function buildSolutionRow(solution) {
-  const competition = solution.competition || {};
-  const score = solution.score;
-  return el(
-    'tr',
-    null,
-    el('td', null, competition.slug ? el('a', { href: bountyHref(competition.slug) }, competition.title || competition.slug) : '—', el('div', { className: 'muted small' }, [competition.category, competition.status].filter(Boolean).join(' · '))),
-    el('td', { className: 'col-title' }, solution.title || ''),
-    el('td', { className: 'col-score' }, score ? formatScore(score.value, score.display, score.column) : '—', score?.column?.title && el('div', { className: 'muted small' }, score.column.title)),
-    el('td', null, solution.placement ? `#${solution.placement}` : '—'),
-    el('td', { className: solution.prize_usd ? 'prize' : '' }, solution.prize_usd ? formatUsd(solution.prize_usd) : '—'),
-    el('td', { className: 'col-received' }, solution.entered_at ? formatDateTime(solution.entered_at) : '', competition.slug && el('div', null, el('a', { className: 'small', href: leaderboardHref(competition.slug) }, 'Leaderboard'))),
-  );
+/** Append the next SOLUTIONS_PAGE_SIZE entries to the table; rows already shown are left alone. */
+function appendNextSolutions(tbody, solutions, moreButton) {
+  const shown = tbody.children.length;
+  tbody.append(...solutions.slice(shown, shown + SOLUTIONS_PAGE_SIZE).map(buildSolutionRow));
+  moreButton.hidden = tbody.children.length >= solutions.length;
 }
 
 export async function mountProfileView(container, { handle }, route) {
@@ -49,14 +20,7 @@ export async function mountProfileView(container, { handle }, route) {
   const record = profile.record || {};
   const solutions = profile.solutions || [];
   const solutionsBody = el('tbody');
-  const moreButton = el('button', { type: 'button', className: 'button show-more', onclick: appendNextSolutions }, 'Show more entries');
-
-  /** Append the next SOLUTIONS_PAGE_SIZE entries to the table. */
-  function appendNextSolutions() {
-    const shown = solutionsBody.children.length;
-    solutionsBody.append(...solutions.slice(shown, shown + SOLUTIONS_PAGE_SIZE).map(buildSolutionRow));
-    moreButton.hidden = solutionsBody.children.length >= solutions.length;
-  }
+  const moreButton = el('button', { type: 'button', className: 'button show-more', onclick: () => appendNextSolutions(solutionsBody, solutions, moreButton) }, 'Show more entries');
 
   const stats = [
     statBlock('Prize money', formatUsd(record.prize_usd || 0), 'stat-pot'),
@@ -86,5 +50,41 @@ export async function mountProfileView(container, { handle }, route) {
       ),
     ),
   );
-  appendNextSolutions();
+  appendNextSolutions(solutionsBody, solutions, moreButton);
 }
+
+function profileLinks(profile) {
+  const links = [];
+  if (profile.github_login) links.push(['GitHub', `https://github.com/${encodeURIComponent(profile.github_login)}`, profile.github_login]);
+  if (profile.x?.url) links.push(['X', profile.x.url, `@${profile.x.username}`]);
+  if (profile.discord?.url) links.push(['Discord', profile.discord.url, profile.discord.global_name || profile.discord.username]);
+  if (profile.wallet?.explorer_url) links.push(['Wallet', profile.wallet.explorer_url, `${profile.wallet.address.slice(0, 4)}…${profile.wallet.address.slice(-4)}`]);
+  return links.filter(([, href]) => /^https:\/\//.test(href));
+}
+
+function buildSolutionRow(solution) {
+  const competition = solution.competition || {};
+  const score = solution.score;
+  return el(
+    'tr',
+    null,
+    el('td', null, competition.slug ? el('a', { href: bountyHref(competition.slug) }, competition.title || competition.slug) : '—', el('div', { className: 'muted small' }, [competition.category, competition.status].filter(Boolean).join(' · '))),
+    el('td', { className: 'col-title' }, solution.title || ''),
+    el('td', { className: 'col-score' }, score ? formatScore(score.value, score.display, score.column) : '—', score?.column?.title && el('div', { className: 'muted small' }, score.column.title)),
+    el('td', null, solution.placement ? `#${solution.placement}` : '—'),
+    el('td', { className: solution.prize_usd ? 'prize' : '' }, solution.prize_usd ? formatUsd(solution.prize_usd) : '—'),
+    el('td', { className: 'col-received' }, solution.entered_at ? formatDateTime(solution.entered_at) : '', competition.slug && el('div', null, el('a', { className: 'small', href: leaderboardHref(competition.slug) }, 'Leaderboard'))),
+  );
+}
+
+adoptViewStyles(`
+.profile-header{display:flex;gap:20px;align-items:flex-start;margin-bottom:20px}
+.profile-identity{min-width:0}
+.profile-identity h1{margin-bottom:2px;overflow-wrap:anywhere}
+.profile-bio{max-width:70ch;margin:8px 0}
+.profile-links{display:flex;flex-wrap:wrap;gap:4px 16px;margin:0;padding:0;list-style:none;font-size:.9rem}
+.solutions-table .col-score{font-weight:800;white-space:nowrap}
+.solutions-table .prize{color:var(--money);font-weight:800}
+.show-more{margin-top:12px}
+@media (max-width:640px){.profile-stats{grid-template-columns:repeat(3,minmax(0,1fr))}.profile-header{gap:14px}.profile-header .avatar{--avatar-size:64px!important;width:64px;height:64px}.solutions-table .col-title,.solutions-table .col-received{display:none}}
+`);
