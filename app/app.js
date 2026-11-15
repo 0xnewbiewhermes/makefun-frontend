@@ -231,12 +231,12 @@ export const leaderboardHref = (slug) => `#/bounty/${encodeURIComponent(slug)}/l
 export const profileHref = (handle) => `#/u/${encodeURIComponent(handle)}`;
 
 const BOARD_SORTS = {
-  ending: ['Ending soonest', (a, b) => new Date(a.deadline) - new Date(b.deadline)],
   pot: ['Biggest pot', (a, b) => livePotUsd(b) - livePotUsd(a)],
+  ending: ['Ending soonest', (a, b) => new Date(a.deadline) - new Date(b.deadline)],
   entries: ['Most entries', (a, b) => b.submissionCount - a.submissionCount],
   newest: ['Newest', (a, b) => new Date(b.publishedAt || 0) - new Date(a.publishedAt || 0)],
 };
-const boardFilters = { sort: 'ending', category: 'all', query: '' };
+const boardFilters = { sort: 'pot', category: 'all', query: '' };
 const bountyCards = new Map();
 
 function createBountyCard(slug) {
