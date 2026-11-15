@@ -8,6 +8,7 @@
 //
 // window.__shotReady is false while a route loads and true once its data is on screen.
 
+import { boardPath, bountyPath, leaderboardPath, profilePath, readCached } from './api.js';
 import { mountBoardView } from './board-view.js';
 import { renderErrorState, renderSkeleton, stopAllCountdowns } from './ui.js';
 
@@ -20,6 +21,14 @@ const ROUTE_MOUNTERS = {
   bounty: async () => (await loadBountyView()).mountBountyView,
   leaderboard: async () => (await loadLeaderboardView()).mountLeaderboardView,
   profile: async () => (await loadProfileView()).mountProfileView,
+};
+
+/** The API read each route paints from, started alongside the route's import() so the two download in parallel. */
+const ROUTE_DATA_PATHS = {
+  board: () => boardPath(),
+  bounty: ({ slug }) => bountyPath(slug),
+  leaderboard: ({ slug }) => leaderboardPath(slug),
+  profile: ({ handle }) => profilePath(handle),
 };
 
 const viewRoot = document.getElementById('view');
@@ -53,6 +62,7 @@ async function renderCurrentRoute() {
   viewRoot.replaceChildren(renderSkeleton(route.name));
   if (!isFirstRender) window.scrollTo(0, 0);
   const routeContext = { isCurrent: () => generation === routeGeneration };
+  readCached(ROUTE_DATA_PATHS[route.name](route.params)).catch(() => {});
   try {
     const mountView = await ROUTE_MOUNTERS[route.name]();
     const unmount = await mountView(viewRoot, route.params, routeContext);
