@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="description" content="A fast, read-only make.fun frontend: live bounties, bounty pages, leaderboards and profiles.">
+<title>Live bounties · make.fun</title>
+<link rel="preconnect" href="https://make.fun" crossorigin>
+<link rel="stylesheet" href="style.css">
+<link rel="modulepreload" href="ui.js">
+<link rel="modulepreload" href="api.js">
+<link rel="modulepreload" href="board-view.js">
+<script type="module" src="main.js"></script>
+</head>
+<body>
+<a class="skip-link" href="#view">Skip to content</a>
+<header class="site-header">
+  <nav class="site-nav" aria-label="Main">
+    <a class="brand" href="#/"><span class="brand-mark" aria-hidden="true">m</span>make.fun <span class="brand-sub">board</span></a>
+    <a class="nav-link" href="#/" data-nav="board">Bounties</a>
+    <form id="profile-search" class="profile-search" role="search">
+      <label class="visually-hidden" for="profile-handle">Find a profile by handle</label>
+      <input id="profile-handle" class="input" name="handle" placeholder="Find @handle" autocomplete="off" spellcheck="false">
+      <button class="button" type="submit">Go</button>
+    </form>
+  </nav>
+</header>
+<main id="view" class="view" tabindex="-1"></main>
+<footer class="site-footer">Live data from the <a href="https://make.fun/api/openapi.json">make.fun public API</a> · read-only</footer>
+</body>
+</html>
