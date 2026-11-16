@@ -176,7 +176,7 @@ adoptViewStyles(`
 .col-interval,.col-received{color:var(--muted);font-size:.92rem;white-space:nowrap}
 .lb-head .col-score{white-space:normal;line-height:1.1}
 .lb-head>*{font-size:.75rem;color:var(--muted)}
-@media (max-width:760px){.lb-row{grid-template-columns:2.2rem minmax(0,1fr) 4.6rem;gap:8px;padding:0 10px}.col-interval,.col-received{display:none}.col-score{font-size:1.05rem}.col-rank{font-size:1.1rem}}
+@media (max-width:760px){.lb-row{grid-template-columns:2.2rem minmax(0,1fr) 4.6rem;gap:8px;padding:0 10px}.col-interval,.col-received{display:none}.col-score{font-size:1.05rem}.col-rank{font-size:1.1rem}.lb-row.lb-head{height:auto;min-height:36px;padding-block:6px;grid-template-columns:2.2rem minmax(0,1fr) 5.4rem}}
 `);
 
 export { mountLeaderboardView };
