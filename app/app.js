@@ -25,13 +25,24 @@ async function readCachedWithEtag(path) {
   return { data, changed: true };
 }
 
+/** Re-read `path` every minute while the tab is visible (and on return to it); onChange only when the answer changed. */
+export function revalidateWhileVisible(path, onChange) {
+  const revalidate = () => document.visibilityState === 'visible' && revalidateOnce(path).then((r) => r.changed && onChange(r.data), () => {});
+  const timer = setInterval(revalidate, REVALIDATE_EVERY_MS);
+  document.addEventListener('visibilitychange', revalidate);
+  return () => {
+    clearInterval(timer);
+    document.removeEventListener('visibilitychange', revalidate);
+  };
+}
+
 /** Put the cards in order by moving the existing nodes; a card that drops out is detached, never destroyed. */
 function patchBoardCardsInPlace(list, cards) {
   cards.forEach((card, index) => list.children[index] !== card && list.insertBefore(card, list.children[index] || null));
   while (list.children.length > cards.length) list.lastElementChild.remove();
 }
 
-/** One 1 s timer for every [data-deadline] node on the page: rewrites its text and urgency, never its element. */
+/** One 1 s timer for every [data-deadline] countdown and [data-checked] "checked Ns ago" node: text only, same elements. */
 function tickCountdownsInPlace() {
   if (document.hidden) return;
   for (const node of document.querySelectorAll('[data-deadline]')) {
@@ -40,6 +51,18 @@ function tickCountdownsInPlace() {
     const urgency = ms < 3_600_000 ? 'urgent' : ms < 86_400_000 ? 'soon' : '';
     if (node.dataset.urgency !== urgency) node.dataset.urgency = urgency;
   }
+  for (const node of document.querySelectorAll('[data-checked]')) {
+    const fetchedAt = responseCache.get(node.dataset.checked)?.fetchedAt;
+    if (fetchedAt) setText(node, `● Live · checked ${formatTimeAgo(new Date(fetchedAt))}`);
+  }
+}
+
+/** Stale-while-revalidate: the cached answer at once, a background re-check when it is older than FRESH_FOR_MS. */
+export function readCached(path, onChange) {
+  const cached = responseCache.get(path);
+  if (!cached) return revalidateOnce(path).then((result) => result.data);
+  if (Date.now() - cached.fetchedAt > FRESH_FOR_MS) revalidateOnce(path).then((r) => r.changed && onChange?.(r.data), () => {});
+  return Promise.resolve(cached.data);
 }
 
 export function startApp(handoff) {
@@ -55,24 +78,6 @@ export function startApp(handoff) {
   renderCurrentRoute().then(warmLaterViewsWhenIdle);
 }
 
-export function revalidateWhileVisible(path, onChange) {
-  const revalidate = () => document.visibilityState === 'visible' && revalidateOnce(path).then((r) => r.changed && onChange(r.data), () => {});
-  const timer = setInterval(revalidate, REVALIDATE_EVERY_MS);
-  document.addEventListener('visibilitychange', revalidate);
-  return () => {
-    clearInterval(timer);
-    document.removeEventListener('visibilitychange', revalidate);
-  };
-}
-
-/** Stale-while-revalidate: the cached answer at once, a background re-check when it is older than FRESH_FOR_MS. */
-export function readCached(path, onChange) {
-  const cached = responseCache.get(path);
-  if (!cached) return revalidateOnce(path).then((result) => result.data);
-  if (Date.now() - cached.fetchedAt > FRESH_FOR_MS) revalidateOnce(path).then((r) => r.changed && onChange?.(r.data), () => {});
-  return Promise.resolve(cached.data);
-}
-
 /** The board (#/): adopts index.html's first frame when it is on screen, else paints it, then adds the controls. */
 async function mountBoardView(container, _params, route) {
   document.title = 'Live bounties · make.fun';
@@ -86,7 +91,8 @@ async function mountBoardView(container, _params, route) {
   const resultCount = el('p', { className: 'board-result-count', 'aria-live': 'polite' });
   const emptyState = el('p', { className: 'empty-state', hidden: true }, 'No live bounty matches. Clear the search or pick another category.');
   const { toolbar, chips } = buildBoardToolbar(applyBoardFilters);
-  frame.list.before(toolbar, chips, resultCount);
+  frame.live.dataset.checked = apiPaths.board();
+  frame.list.before(toolbar, resultCount);
   frame.list.after(emptyState);
 
   function applyBoardFilters() {
@@ -227,7 +233,7 @@ export const formatDate = (iso) => (iso ? new Date(iso).toLocaleDateString('en-U
 
 export function formatTimeAgo(iso) {
   const seconds = Math.max(0, (Date.now() - new Date(iso)) / 1000);
-  if (seconds < 60) return 'just now';
+  if (seconds < 60) return `${Math.floor(seconds)}s ago`;
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
   return seconds < 86400 ? `${Math.floor(seconds / 3600)}h ago` : `${Math.floor(seconds / 86400)}d ago`;
 }
@@ -264,7 +270,7 @@ function buildBoardToolbar(onChange) {
     const chip = event.target.closest('[data-category]');
     if (chip) onChange((boardFilters.category = chip.dataset.category));
   });
-  return { toolbar: el('div', { className: 'board-toolbar' }, search, sort), chips };
+  return { toolbar: el('div', { className: 'board-toolbar' }, search, chips, sort), chips };
 }
 
 function renderCategoryChips(container, bounties) {
@@ -328,43 +334,40 @@ function warmLaterViewsWhenIdle() {
 // The palette as variables (index.html's first frame paints the light one in literals), dark mode, the board's
 // controls and everything the later views share.
 const APP_CSS = `
-:root{--bg:#f3f4f7;--surface:#fff;--surface-2:#eceef3;--border:#d8dce4;--text:#11131a;--muted:#555c6a;--accent:#5b3df5;--on-accent:#fff;--accent-soft:#ece8ff;--money:#067a3e;--money-soft:#e2f4e9;--soon:#a35400;--urgent:#c4252c;--gold:#a87b05;--focus:#1f6feb;--radius:12px;--mono:ui-monospace,Consolas,monospace;background:var(--bg);color:var(--text)}
-@media (prefers-color-scheme:dark){:root{--bg:#0d0f14;--surface:#171a21;--surface-2:#21252e;--border:#2d323d;--text:#eef0f4;--muted:#a3aab8;--accent:#9d8cff;--on-accent:#0d0f14;--accent-soft:#272046;--money:#4fd890;--money-soft:#14301f;--soon:#ffb054;--urgent:#ff7070;--gold:#f0c24c;--focus:#6ea8ff;color-scheme:dark}}
+:root{color-scheme:light dark;--surface-2:#eceef3;--on-accent:#fff;--accent-soft:#ece8ff;--money-soft:#e2f4e9;--soon:#a35400;--urgent:#c4252c;--gold:#a87b05;--focus:#1f6feb;--radius:12px;--mono:ui-monospace,Consolas,monospace}
+@media (prefers-color-scheme:dark){:root{--surface-2:#232733;--on-accent:#0d0f14;--accent-soft:#2a2350;--money-soft:#14301f;--soon:#ffb054;--urgent:#ff7a7a;--gold:#f0c24c;--focus:#6ea8ff}}
 a{color:var(--accent);text-underline-offset:2px}
 :focus-visible{outline:3px solid var(--focus);outline-offset:2px}
 h1:focus{outline:none}
 body>header{flex-wrap:wrap}
-.card{position:relative;background:var(--surface);border-color:var(--border)}
+.card{position:relative}
 .title::after{content:"";position:absolute;inset:0}
 .card:hover,.card:focus-within{border-color:var(--accent)}
 .title:focus-visible{outline:none}
 .title:focus-visible::after{outline:3px solid var(--focus);border-radius:12px}
-.grid{grid-template-columns:repeat(auto-fill,minmax(min(340px,100%),1fr))}
-small,.totals,.meta{color:var(--muted)}
-.cat{color:var(--accent)}
-.money .pot{color:var(--money)}
-.meta{border-color:var(--border)}
 [data-urgency=soon]{color:var(--soon)}
 [data-urgency=urgent]{color:var(--urgent)}
 .muted{color:var(--muted)}
 .small{font-size:.85rem}
 .visually-hidden{position:absolute!important;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
-.input,.button,.chip{font:inherit;color:var(--text);background:var(--surface);border:1px solid var(--border)}
+.input,.button,.chip{box-sizing:border-box;font:inherit;color:var(--text);background:var(--surface);border:1px solid var(--border)}
 .input{min-height:38px;padding:6px 10px;border-radius:8px;font-size:.95rem}
 .button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:38px;padding:6px 14px;border-radius:8px;font-size:.95rem;font-weight:600;text-decoration:none;cursor:pointer}
 .button:hover{border-color:var(--accent)}
 .button:disabled{opacity:.45;cursor:default}
 .button-primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
-.profile-search{margin-left:auto;display:flex;gap:6px}
+.profile-search{margin-left:auto;display:flex;align-items:center;gap:6px}
 .profile-search .input{width:11rem;background:#fff2;border-color:#fff4;color:#fff}
 .profile-search .input::placeholder{color:#fffa}
 .profile-search .button{background:#fff;color:#14121f;border-color:#fff}
-.board-toolbar{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
-.board-toolbar [type=search]{flex:1 1 240px}
-.category-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
-.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:999px;font-size:.88rem;font-weight:600;cursor:pointer}
+.board-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:12px}
+.board-toolbar [type=search]{flex:1 1 220px}
+.category-chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:4px 12px;border-radius:999px;font-size:.9rem;font-weight:600;cursor:pointer}
+.chip:hover{border-color:var(--accent)}
 .chip[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
 .chip-count{opacity:.75}
+@media (max-width:640px){.category-chips{order:1;flex:1 1 100%;flex-wrap:nowrap;overflow-x:auto;padding:2px}.chip{flex:none}.board-toolbar [type=search]{flex-basis:150px;min-width:0}.board-toolbar select{max-width:45%}}
 .board-result-count{margin:0 0 8px;color:var(--muted)}
 .board-result-count:empty{display:none}
 .empty-state{padding:32px 16px;border:1px dashed var(--border);border-radius:var(--radius);background:var(--surface);color:var(--muted);text-align:center}
