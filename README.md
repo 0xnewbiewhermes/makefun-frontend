@@ -6,13 +6,13 @@
 
 A fast, read-only make.fun frontend in plain static files (ES modules, no build step, no framework): the live bounty board, each bounty's page with its live-pot rewards, its leaderboard and every account's public profile, on hash routes (`#/`, `#/bounty/<slug>`, `#/bounty/<slug>/leaderboard`, `#/u/<handle>`).
 
-- **First load: 1 file, ~2.2 KB gzipped**: `index.html` carries the board's CSS and an inline module that reads the open bounties once and paints the cards. `app.js` (ETag cache, router, board controls, countdown ticker) loads by `import()` after that first paint and takes over the same nodes; the bounty page, leaderboard and profile are `import()`ed on first use (warmed when idle) and bring their own CSS as adopted stylesheets.
-- **One request per view** (the bounty page's rail reuses the board's cached read; opened directly on a wide screen it makes a second), cached in memory, served stale-while-revalidate and re-checked every minute while the tab is visible with `If-None-Match`; an unchanged answer touches nothing.
+- **First load: 1 file, ~2.5 KB gzipped**: `index.html` carries the board's CSS (light and dark palettes, so the first frame already follows the system colour scheme) and an inline module that reads the open bounties once and paints the cards. `app.js` (ETag cache, router, board controls, countdown ticker) loads by `import()` after that first paint and takes over the same nodes; the bounty page, leaderboard and profile are `import()`ed on first use (warmed when idle) and bring their own CSS as adopted stylesheets.
+- **One request per view** (the bounty page's rail reuses the board's cached read; opened directly on a wide screen it makes a second), cached in memory, served stale-while-revalidate and re-checked every minute while the tab is visible with `If-None-Match`; an unchanged answer touches nothing. The board shows when it last checked ("Live · checked 12s ago").
 - **In-place updates**: board cards are keyed by slug and patched (re-sorting moves nodes, never rebuilds them); every countdown is a `[data-deadline]` node rewritten by one 1 s timer.
 - **Master-detail** from 1100 px: the bounty page keeps the board's list beside it (one rail element, reused from bounty to bounty).
-- **Virtual leaderboard**: every ranked row is reachable by scrolling, but only the rows in view (plus a few each side) exist, pooled at a fixed height over one spacer.
+- **Virtual leaderboard**: every ranked row is reachable by scrolling, but only the rows in view (plus a few each side) exist, pooled at a fixed height over one spacer; the page says how many ("16 of 125 rows in the DOM").
 - **Decision help on every card**: live pot, entry fee and time left up front, plus entries per paid place.
-- Works from a 390 px phone up.
+- Works from a 390 px phone up, in light and dark mode.
 
 ## Run it
 
