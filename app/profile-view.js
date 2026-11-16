@@ -3,15 +3,6 @@
 
 import { absoluteAssetUrl, adoptViewStyles, apiPaths, avatarImage, bountyHref, breadcrumb, el, formatDate, formatDateTime, formatScore, formatUsd, leaderboardHref, readCached, statBlock } from './app.js';
 
-const SOLUTIONS_PAGE_SIZE = 25;
-
-/** Append the next SOLUTIONS_PAGE_SIZE entries to the table; rows already shown are left alone. */
-function appendNextSolutions(tbody, solutions, moreButton) {
-  const shown = tbody.children.length;
-  tbody.append(...solutions.slice(shown, shown + SOLUTIONS_PAGE_SIZE).map(buildSolutionRow));
-  moreButton.hidden = tbody.children.length >= solutions.length;
-}
-
 export async function mountProfileView(container, { handle }, route) {
   const profile = await readCached(apiPaths.profile({ handle }));
   if (!route.isCurrent()) return;
@@ -51,6 +42,15 @@ export async function mountProfileView(container, { handle }, route) {
   );
   appendNextSolutions(solutionsBody, solutions, moreButton);
 }
+
+/** Append the next SOLUTIONS_PAGE_SIZE entries to the table; rows already shown are left alone. */
+function appendNextSolutions(tbody, solutions, moreButton) {
+  const shown = tbody.children.length;
+  tbody.append(...solutions.slice(shown, shown + SOLUTIONS_PAGE_SIZE).map(buildSolutionRow));
+  moreButton.hidden = tbody.children.length >= solutions.length;
+}
+
+const SOLUTIONS_PAGE_SIZE = 25;
 
 function profileLinks(profile) {
   const links = [];

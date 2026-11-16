@@ -2,19 +2,6 @@
 // controls and in-place updates, the countdown ticker, and the helpers the lazily imported views share.
 // The board painters and formatters are index.html's own, handed over in startApp, so none is written twice.
 
-export function startApp(handoff) {
-  ({ formatUsd, formatTimeLeft, livePotUsd, isTakingEntries, setText } = handoff);
-  firstFrame = handoff;
-  if (handoff.firstRead) responseCache.set(apiPaths.board(), { ...handoff.firstRead, fetchedAt: Date.now() });
-  adoptViewStyles(APP_CSS);
-  mountProfileSearch(document.querySelector('body>header'));
-  viewRoot.addEventListener('pointerover', prefetchBountyOnHover);
-  addEventListener('hashchange', renderCurrentRoute);
-  tickCountdownsInPlace();
-  setInterval(tickCountdownsInPlace, 1000);
-  renderCurrentRoute().then(warmLaterViewsWhenIdle);
-}
-
 /** GET with If-None-Match. A 304, or a 200 with the same body (tags turn every minute), reports changed: false. */
 async function readCachedWithEtag(path) {
   const cached = responseCache.get(path);
@@ -38,22 +25,10 @@ async function readCachedWithEtag(path) {
   return { data, changed: true };
 }
 
-/** Stale-while-revalidate: the cached answer at once, a background re-check when it is older than FRESH_FOR_MS. */
-export function readCached(path, onChange) {
-  const cached = responseCache.get(path);
-  if (!cached) return revalidateOnce(path).then((result) => result.data);
-  if (Date.now() - cached.fetchedAt > FRESH_FOR_MS) revalidateOnce(path).then((r) => r.changed && onChange?.(r.data), () => {});
-  return Promise.resolve(cached.data);
-}
-
-export function revalidateWhileVisible(path, onChange) {
-  const revalidate = () => document.visibilityState === 'visible' && revalidateOnce(path).then((r) => r.changed && onChange(r.data), () => {});
-  const timer = setInterval(revalidate, REVALIDATE_EVERY_MS);
-  document.addEventListener('visibilitychange', revalidate);
-  return () => {
-    clearInterval(timer);
-    document.removeEventListener('visibilitychange', revalidate);
-  };
+/** Put the cards in order by moving the existing nodes; a card that drops out is detached, never destroyed. */
+function patchBoardCardsInPlace(list, cards) {
+  cards.forEach((card, index) => list.children[index] !== card && list.insertBefore(card, list.children[index] || null));
+  while (list.children.length > cards.length) list.lastElementChild.remove();
 }
 
 /** One 1 s timer for every [data-deadline] node on the page: rewrites its text and urgency, never its element. */
@@ -67,10 +42,41 @@ function tickCountdownsInPlace() {
   }
 }
 
+export function startApp(handoff) {
+  ({ formatUsd, formatTimeLeft, livePotUsd, isTakingEntries, setText } = handoff);
+  firstFrame = handoff;
+  if (handoff.firstRead) responseCache.set(apiPaths.board(), { ...handoff.firstRead, fetchedAt: Date.now() });
+  adoptViewStyles(APP_CSS);
+  mountProfileSearch(document.querySelector('body>header'));
+  viewRoot.addEventListener('pointerover', prefetchBountyOnHover);
+  addEventListener('hashchange', renderCurrentRoute);
+  tickCountdownsInPlace();
+  setInterval(tickCountdownsInPlace, 1000);
+  renderCurrentRoute().then(warmLaterViewsWhenIdle);
+}
+
+export function revalidateWhileVisible(path, onChange) {
+  const revalidate = () => document.visibilityState === 'visible' && revalidateOnce(path).then((r) => r.changed && onChange(r.data), () => {});
+  const timer = setInterval(revalidate, REVALIDATE_EVERY_MS);
+  document.addEventListener('visibilitychange', revalidate);
+  return () => {
+    clearInterval(timer);
+    document.removeEventListener('visibilitychange', revalidate);
+  };
+}
+
+/** Stale-while-revalidate: the cached answer at once, a background re-check when it is older than FRESH_FOR_MS. */
+export function readCached(path, onChange) {
+  const cached = responseCache.get(path);
+  if (!cached) return revalidateOnce(path).then((result) => result.data);
+  if (Date.now() - cached.fetchedAt > FRESH_FOR_MS) revalidateOnce(path).then((r) => r.changed && onChange?.(r.data), () => {});
+  return Promise.resolve(cached.data);
+}
+
 /** The board (#/): adopts index.html's first frame when it is on screen, else paints it, then adds the controls. */
 async function mountBoardView(container, _params, route) {
   document.title = 'Live bounties · make.fun';
-  const onChange = (fresh) => route.isCurrent() && applyBoardData(fresh);
+  const onChange = route.whenCurrent((fresh) => applyBoardData(fresh));
   const data = await readCached(apiPaths.board(), onChange);
   if (!route.isCurrent()) return;
   const frame = firstFrame.frame?.list.isConnected ? firstFrame.frame : firstFrame.paintBoardFirstFrame(container, data.items.filter(isTakingEntries));
@@ -102,12 +108,6 @@ async function mountBoardView(container, _params, route) {
   return revalidateWhileVisible(apiPaths.board(), onChange);
 }
 
-/** Put the cards in order by moving the existing nodes; a card that drops out is detached, never destroyed. */
-function patchBoardCardsInPlace(list, cards) {
-  cards.forEach((card, index) => list.children[index] !== card && list.insertBefore(card, list.children[index] || null));
-  while (list.children.length > cards.length) list.lastElementChild.remove();
-}
-
 async function renderCurrentRoute() {
   const generation = ++activeRoute.generation;
   window.__shotReady = false;
@@ -117,7 +117,7 @@ async function renderCurrentRoute() {
   const adoptsFirstFrame = generation === 1 && firstFrame.frame;
   if (!adoptsFirstFrame) viewRoot.replaceChildren(renderSkeleton(name));
   if (generation > 1) scrollTo(0, 0);
-  const route = { isCurrent: () => generation === activeRoute.generation };
+  const route = { isCurrent: () => generation === activeRoute.generation, whenCurrent: (fn) => (...args) => route.isCurrent() && fn(...args) };
   readCached(apiPaths[name](params)).catch(() => {});
   try {
     const unmount = await (await ROUTES[name]())(viewRoot, params, route);
@@ -334,7 +334,8 @@ a{color:var(--accent);text-underline-offset:2px}
 :focus-visible{outline:3px solid var(--focus);outline-offset:2px}
 h1:focus{outline:none}
 body>header{flex-wrap:wrap}
-.card{background:var(--surface);border-color:var(--border)}
+.card{position:relative;background:var(--surface);border-color:var(--border)}
+.title::after{content:"";position:absolute;inset:0}
 .card:hover,.card:focus-within{border-color:var(--accent)}
 .title:focus-visible{outline:none}
 .title:focus-visible::after{outline:3px solid var(--focus);border-radius:12px}

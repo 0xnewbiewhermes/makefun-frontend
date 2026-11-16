@@ -5,9 +5,6 @@
 
 import { absoluteAssetUrl, adoptViewStyles, apiPaths, avatarImage, bountyHref, breadcrumb, el, formatCount, formatScore, formatTimeAgo, profileHref, readCached, revalidateWhileVisible, setText } from './app.js';
 
-const ROW_HEIGHT = 52;
-const OVERSCAN_ROWS = 6;
-
 /** Render only the rows that intersect the viewport (window scroll), reusing pooled row elements. */
 function virtualiseLeaderboardRows(view) {
   const { state } = view;
@@ -32,26 +29,6 @@ function virtualiseLeaderboardRows(view) {
   view.list.setAttribute('aria-rowcount', String(rows.length + 1));
   view.emptyState.hidden = rows.length > 0;
   setText(view.emptyState, state.query ? 'No entry matches that filter.' : 'No ranked entries yet: scores show here once entries are judged.');
-}
-
-function fillPooledRow({ row, cells }, entry, rankColumn) {
-  row.className = `lb-row${entry.rank <= 3 ? ' podium' : ''}`;
-  setText(cells.rank, entry.rank ?? '—');
-  setText(cells.handle, entry.handle ? `@${entry.handle}` : 'anonymous');
-  if (entry.handle) cells.handle.href = profileHref(entry.handle);
-  else cells.handle.removeAttribute('href');
-  const avatarUrl = absoluteAssetUrl(entry.image) || '';
-  if (cells.avatarSlot.dataset.src !== avatarUrl || !cells.avatarSlot.firstChild) {
-    cells.avatarSlot.dataset.src = avatarUrl;
-    cells.avatarSlot.replaceChildren(avatarImage(avatarUrl, entry.handle, 28));
-  }
-  cells.house.hidden = !entry.house;
-  setText(cells.title, entry.title || '');
-  cells.title.title = entry.title || '';
-  setText(cells.score, formatScore(entry.value, entry.display, rankColumn));
-  const { low, high } = entry.interval || {};
-  setText(cells.interval, entry.interval ? `${formatScore(low, low, rankColumn)} – ${formatScore(high, high, rankColumn)}` : '');
-  setText(cells.received, entry.receivedAt ? formatTimeAgo(entry.receivedAt) : '');
 }
 
 export async function mountLeaderboardView(container, { slug }, route) {
@@ -86,7 +63,7 @@ export async function mountLeaderboardView(container, { slug }, route) {
     applyFilter();
   }
 
-  const onChange = (fresh) => route.isCurrent() && applyLeaderboardData(fresh);
+  const onChange = route.whenCurrent((fresh) => applyLeaderboardData(fresh));
   const board = await readCached(apiPaths.leaderboard({ slug }), onChange);
   if (!route.isCurrent()) return;
   container.replaceChildren(view.page);
@@ -99,6 +76,26 @@ export async function mountLeaderboardView(container, { slug }, route) {
     removeEventListener('scroll', scheduleVirtualise);
     removeEventListener('resize', scheduleVirtualise);
   };
+}
+
+function fillPooledRow({ row, cells }, entry, rankColumn) {
+  row.className = `lb-row${entry.rank <= 3 ? ' podium' : ''}`;
+  setText(cells.rank, entry.rank ?? '—');
+  setText(cells.handle, entry.handle ? `@${entry.handle}` : 'anonymous');
+  if (entry.handle) cells.handle.href = profileHref(entry.handle);
+  else cells.handle.removeAttribute('href');
+  const avatarUrl = absoluteAssetUrl(entry.image) || '';
+  if (cells.avatarSlot.dataset.src !== avatarUrl || !cells.avatarSlot.firstChild) {
+    cells.avatarSlot.dataset.src = avatarUrl;
+    cells.avatarSlot.replaceChildren(avatarImage(avatarUrl, entry.handle, 28));
+  }
+  cells.house.hidden = !entry.house;
+  setText(cells.title, entry.title || '');
+  cells.title.title = entry.title || '';
+  setText(cells.score, formatScore(entry.value, entry.display, rankColumn));
+  const { low, high } = entry.interval || {};
+  setText(cells.interval, entry.interval ? `${formatScore(low, low, rankColumn)} – ${formatScore(high, high, rankColumn)}` : '');
+  setText(cells.received, entry.receivedAt ? formatTimeAgo(entry.receivedAt) : '');
 }
 
 /** Both row shapes the API sends (whole and light) as one list sorted by rank. */
@@ -145,6 +142,9 @@ function buildLeaderboardLayout(slug) {
   );
   return view;
 }
+
+const ROW_HEIGHT = 52;
+const OVERSCAN_ROWS = 6;
 
 adoptViewStyles(`
 .leaderboard-summary{margin:0;color:var(--muted)}

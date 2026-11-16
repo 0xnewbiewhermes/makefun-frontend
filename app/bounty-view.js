@@ -7,14 +7,48 @@ import { adoptViewStyles, apiPaths, bountyHref, breadcrumb, el, formatCount, for
 
 export async function mountBountyView(container, { slug }, route) {
   const view = buildBountyLayout(slug);
-  const railReady = matchMedia(MASTER_DETAIL_QUERY).matches && mountBoardRailBeside(view, slug, route);
+  const railReady = matchMedia(MASTER_DETAIL_QUERY).matches && mountBoardListBesideBounty(view, slug, route);
   const fromBoard = peekCached(apiPaths.board())?.items?.find((item) => item.slug === slug);
   if (fromBoard) patchBountyInPlace(container, view, fromBoard);
-  const onChange = (fresh) => route.isCurrent() && patchBountyInPlace(container, view, fresh);
+  const onChange = route.whenCurrent((fresh) => patchBountyInPlace(container, view, fresh));
   const [bounty] = await Promise.all([readCached(apiPaths.bounty({ slug }), onChange), railReady]);
   if (!route.isCurrent()) return;
   patchBountyInPlace(container, view, bounty);
   return revalidateWhileVisible(apiPaths.bounty({ slug }), onChange);
+}
+
+/** The board's list beside the bounty: the cached board read, one rail element moved from page to page. */
+async function mountBoardListBesideBounty(view, slug, route) {
+  view.page.classList.add('with-rail');
+  view.page.prepend(boardRail.node);
+  const onChange = route.whenCurrent((fresh) => patchBoardRailInPlace(fresh.items, slug));
+  const board = peekCached(apiPaths.board()) || (await readCached(apiPaths.board(), onChange).catch(() => null));
+  if (board && route.isCurrent()) patchBoardRailInPlace(board.items, slug);
+}
+
+/** One row per live bounty, keyed by slug and rewritten in place; the open bounty is marked aria-current. */
+function patchBoardRailInPlace(items, currentSlug) {
+  const live = items.filter(isTakingEntries).sort((a, b) => livePotUsd(b) - livePotUsd(a));
+  const rows = live.map((bounty) => {
+    let row = boardRail.rows.get(bounty.slug);
+    if (!row) {
+      row = { title: el('span', { className: 'rail-title' }), pot: el('b', { className: 'rail-pot' }), left: el('span', { className: 'rail-left' }), fee: el('span', { className: 'rail-fee' }) };
+      row.link = el('a', { href: bountyHref(bounty.slug), className: 'rail-link' }, row.title, el('span', { className: 'rail-numbers' }, row.pot, row.fee, row.left));
+      row.node = el('li', null, row.link);
+      boardRail.rows.set(bounty.slug, row);
+    }
+    setText(row.title, bounty.title);
+    setText(row.pot, formatUsd(livePotUsd(bounty)));
+    setText(row.fee, formatEntryFee(bounty) === 'Free' ? 'free' : `${formatEntryFee(bounty)} fee`);
+    row.left.dataset.deadline = bounty.deadline;
+    setText(row.left, formatTimeLeft(bounty.deadline));
+    if (bounty.slug === currentSlug) row.link.setAttribute('aria-current', 'page');
+    else row.link.removeAttribute('aria-current');
+    return row.node;
+  });
+  rows.forEach((node, index) => boardRail.list.children[index] !== node && boardRail.list.insertBefore(node, boardRail.list.children[index] || null));
+  while (boardRail.list.children.length > rows.length) boardRail.list.lastElementChild.remove();
+  setText(boardRail.count, `${live.length} live`);
 }
 
 /** Write the numbers into the existing nodes; rebuild a heavy block (rewards, dates, text) only when its data changed. */
@@ -50,40 +84,6 @@ function patchBountyInPlace(container, view, bounty) {
   rebuildIfChanged('description', bounty.description, () => view.description.replaceChildren(renderMarkdown(bounty.description || bounty.summary || '')));
   if (bounty.rules) rebuildIfChanged('rules', bounty.rules, () => view.rules.replaceChildren(...buildRulesSections(bounty.rules)));
   view.rulesPanel.hidden = !bounty.rules;
-}
-
-/** The board's list beside the bounty: the cached board read, one rail element moved from page to page. */
-async function mountBoardRailBeside(view, slug, route) {
-  view.page.classList.add('with-rail');
-  view.page.prepend(boardRail.node);
-  const onChange = (fresh) => route.isCurrent() && patchBoardRailInPlace(fresh.items, slug);
-  const board = peekCached(apiPaths.board()) || (await readCached(apiPaths.board(), onChange).catch(() => null));
-  if (board && route.isCurrent()) patchBoardRailInPlace(board.items, slug);
-}
-
-/** One row per live bounty, keyed by slug and rewritten in place; the open bounty is marked aria-current. */
-function patchBoardRailInPlace(items, currentSlug) {
-  const live = items.filter(isTakingEntries).sort((a, b) => livePotUsd(b) - livePotUsd(a));
-  const rows = live.map((bounty) => {
-    let row = boardRail.rows.get(bounty.slug);
-    if (!row) {
-      row = { title: el('span', { className: 'rail-title' }), pot: el('b', { className: 'rail-pot' }), left: el('span', { className: 'rail-left' }), fee: el('span', { className: 'rail-fee' }) };
-      row.link = el('a', { href: bountyHref(bounty.slug), className: 'rail-link' }, row.title, el('span', { className: 'rail-numbers' }, row.pot, row.fee, row.left));
-      row.node = el('li', null, row.link);
-      boardRail.rows.set(bounty.slug, row);
-    }
-    setText(row.title, bounty.title);
-    setText(row.pot, formatUsd(livePotUsd(bounty)));
-    setText(row.fee, formatEntryFee(bounty) === 'Free' ? 'free' : `${formatEntryFee(bounty)} fee`);
-    row.left.dataset.deadline = bounty.deadline;
-    setText(row.left, formatTimeLeft(bounty.deadline));
-    if (bounty.slug === currentSlug) row.link.setAttribute('aria-current', 'page');
-    else row.link.removeAttribute('aria-current');
-    return row.node;
-  });
-  rows.forEach((node, index) => boardRail.list.children[index] !== node && boardRail.list.insertBefore(node, boardRail.list.children[index] || null));
-  while (boardRail.list.children.length > rows.length) boardRail.list.lastElementChild.remove();
-  setText(boardRail.count, `${live.length} live`);
 }
 
 function buildRewardsTable(bounty) {
