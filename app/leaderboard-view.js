@@ -32,43 +32,15 @@ function virtualiseLeaderboardRows(view) {
   setText(view.emptyState, state.query ? 'No entry matches that filter.' : 'No ranked entries yet: scores show here once entries are judged.');
 }
 
-export async function mountLeaderboardView(root, { slug }, route) {
+async function mountLeaderboardView(root, { slug }, route) {
   const view = buildLeaderboardLayout(slug);
-  let frameRequested = false;
-  const scheduleVirtualise = () => {
-    if (frameRequested) return;
-    frameRequested = true;
-    requestAnimationFrame(() => {
-      frameRequested = false;
-      virtualiseLeaderboardRows(view);
-    });
-  };
-  const applyFilter = () => {
-    const { state } = view;
-    state.query = view.search.value.trim().toLowerCase();
-    state.visibleRows = state.query ? state.rows.filter((row) => `${row.handle} ${row.title}`.toLowerCase().includes(state.query)) : state.rows;
-    state.generation++;
-    virtualiseLeaderboardRows(view);
-  };
-  view.search.addEventListener('input', applyFilter);
-
-  function applyLeaderboardData(board) {
-    Object.assign(view.state, normalizeLeaderboardRows(board));
-    const { rows, rankColumn } = view.state;
-    const title = board.competition?.title || slug;
-    document.title = `Leaderboard · ${title} · make.fun`;
-    setText(view.boardTitle, title);
-    setText(view.scoreHeader, rankColumn?.title || 'Score');
-    const phase = board.phase;
-    setText(view.summary, [`${formatCount(rows.length)} ranked ${rows.length === 1 ? 'entry' : 'entries'}`, phase?.title && `${phase.title} phase`, phase?.placements_held && 'places unofficial until results publish'].filter(Boolean).join(' · '));
-    applyFilter();
-  }
-
-  const onChange = route.whenCurrent((fresh) => applyLeaderboardData(fresh));
+  const scheduleVirtualise = oncePerFrame(virtualiseLeaderboardRows.bind(null, view));
+  view.search.addEventListener('input', () => filterRowsOnEachKeystroke(view));
+  const onChange = route.whenCurrent((fresh) => applyLeaderboardData(view, slug, fresh));
   const board = await readCached(apiPaths.leaderboard({ slug }), onChange);
   if (!route.isCurrent()) return;
   root.replaceChildren(view.page);
-  applyLeaderboardData(board);
+  applyLeaderboardData(view, slug, board);
   addEventListener('scroll', scheduleVirtualise, { passive: true });
   addEventListener('resize', scheduleVirtualise);
   const stopRevalidating = revalidateWhileVisible(apiPaths.leaderboard({ slug }), onChange);
@@ -76,6 +48,40 @@ export async function mountLeaderboardView(root, { slug }, route) {
     stopRevalidating();
     removeEventListener('scroll', scheduleVirtualise);
     removeEventListener('resize', scheduleVirtualise);
+  };
+}
+
+/** Type-to-filter: narrows the rows already in memory on every keystroke; no request, the pooled rows are rewritten. */
+function filterRowsOnEachKeystroke(view) {
+  const { state } = view;
+  state.query = view.search.value.trim().toLowerCase();
+  state.visibleRows = state.query ? state.rows.filter((row) => `${row.handle} ${row.title}`.toLowerCase().includes(state.query)) : state.rows;
+  state.generation++;
+  virtualiseLeaderboardRows(view);
+}
+
+function applyLeaderboardData(view, slug, board) {
+  Object.assign(view.state, normalizeLeaderboardRows(board));
+  const { rows, rankColumn } = view.state;
+  const title = board.competition?.title || slug;
+  document.title = `Leaderboard · ${title} · make.fun`;
+  setText(view.boardTitle, title);
+  setText(view.scoreHeader, rankColumn?.title || 'Score');
+  const phase = board.phase;
+  setText(view.summary, [`${formatCount(rows.length)} ranked ${rows.length === 1 ? 'entry' : 'entries'}`, phase?.title && `${phase.title} phase`, phase?.placements_held && 'places unofficial until results publish'].filter(Boolean).join(' · '));
+  filterRowsOnEachKeystroke(view);
+}
+
+/** Coalesce scroll and resize events into one call per animation frame. */
+function oncePerFrame(callback) {
+  let requested = false;
+  return () => {
+    if (requested) return;
+    requested = true;
+    requestAnimationFrame(() => {
+      requested = false;
+      callback();
+    });
   };
 }
 
@@ -172,3 +178,5 @@ adoptViewStyles(`
 .lb-head>*{font-size:.75rem;color:var(--muted)}
 @media (max-width:760px){.lb-row{grid-template-columns:2.2rem minmax(0,1fr) 4.6rem;gap:8px;padding:0 10px}.col-interval,.col-received{display:none}.col-score{font-size:1.05rem}.col-rank{font-size:1.1rem}}
 `);
+
+export { mountLeaderboardView };

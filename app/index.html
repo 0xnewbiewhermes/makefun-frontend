@@ -3,7 +3,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Live bounties · make.fun</title>
-<script type="module">/* 1 read paints the board, then import() app.js */
+<script type=module>/* 1 API read paints the board */
 const boardCards = new Map();
 
 function paintBoardFirstFrame(container, bounties) {
@@ -42,7 +42,7 @@ function writeBoardTotals(frame, bounties) {
 async function readBoardFirstTime() {
   const response = await fetch('https://make.fun/api/competitions?status=open&activity=times', { cache: 'no-store' });
   if (!response.ok) throw response.status;
-  return { etag: response.headers.get('etag'), data: await response.json() };
+  return { data: await response.json() };
 }
 
 function describeEntriesPerPaidPlace(bounty) {
@@ -63,7 +63,7 @@ const isTakingEntries = (bounty) => new Date(bounty.deadline) > Date.now();
 const setText = (node, text) => node.textContent != text && (node.textContent = text);
 
 window.__shotReady = false;
-const firstRead = location.hash.length > 2 ? null : await readBoardFirstTime().catch(() => null);
+const firstRead = location.hash.length > 2 ? null : await readBoardFirstTime().catch(() => 0);
 const frame = firstRead && paintBoardFirstFrame(document.querySelector('main'), firstRead.data.items.filter(isTakingEntries));
 (await import('./app.js')).startApp({ firstRead, frame, paintBoardFirstFrame, writeBoardTotals, patchBoardCardInPlace, formatTimeLeft, formatUsd, livePotUsd, isTakingEntries, setText });
 </script>

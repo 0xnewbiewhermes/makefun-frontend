@@ -3,14 +3,14 @@
 
 import { absoluteAssetUrl, adoptViewStyles, apiPaths, avatarImage, bountyHref, breadcrumb, el, formatDate, formatDateTime, formatScore, formatUsd, leaderboardHref, readCached, statBlock } from './app.js';
 
-export async function mountProfileView(root, { handle }, route) {
+async function mountProfileView(root, { handle }, route) {
   const profile = await readCached(apiPaths.profile({ handle }));
   if (!route.isCurrent()) return;
   document.title = `@${profile.handle} · make.fun`;
   const record = profile.record || {};
   const solutions = profile.solutions || [];
   const solutionsBody = el('tbody');
-  const moreButton = el('button', { type: 'button', className: 'button show-more', onclick: () => appendNextSolutions(solutionsBody, solutions, moreButton) }, 'Show more entries');
+  const moreButton = el('button', { type: 'button', className: 'button show-more', onclick: () => appendNextPageOfEntries(solutionsBody, solutions, moreButton) }, 'Show more entries');
 
   const stats = [
     statBlock('Prize money', formatUsd(record.prize_usd || 0), 'stat-pot'),
@@ -40,14 +40,14 @@ export async function mountProfileView(root, { handle }, route) {
       ),
     ),
   );
-  appendNextSolutions(solutionsBody, solutions, moreButton);
+  appendNextPageOfEntries(solutionsBody, solutions, moreButton);
 }
 
 /** Append the next SOLUTIONS_PAGE_SIZE entries to the table; rows already shown are left alone. */
-function appendNextSolutions(tbody, solutions, more) {
+function appendNextPageOfEntries(tbody, list, more) {
   const shown = tbody.children.length;
-  tbody.append(...solutions.slice(shown, shown + SOLUTIONS_PAGE_SIZE).map(buildSolutionRow));
-  more.hidden = tbody.children.length >= solutions.length;
+  tbody.append(...list.slice(shown, shown + SOLUTIONS_PAGE_SIZE).map(buildSolutionRow));
+  more.hidden = tbody.children.length >= list.length;
 }
 
 const SOLUTIONS_PAGE_SIZE = 25;
@@ -87,3 +87,5 @@ adoptViewStyles(`
 .show-more{margin-top:12px}
 @media (max-width:640px){.profile-stats{grid-template-columns:repeat(3,minmax(0,1fr))}.profile-header{gap:14px}.profile-header .avatar{--avatar-size:64px!important;width:64px;height:64px}.solutions-table .col-title,.solutions-table .col-received,.score-column{display:none}.solutions-table td:first-child{min-width:9rem}.solutions-table th,.solutions-table td{padding:8px 6px}}
 `);
+
+export { mountProfileView };

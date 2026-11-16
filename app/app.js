@@ -1,34 +1,29 @@
-// Loaded by index.html's first-frame script once the board is on screen: the ETag cache, the router, the board's
+// Loaded by index.html's first-frame script once the board is on screen: the response cache, the router, the board's
 // controls and in-place updates, the countdown ticker, and the helpers the lazily imported views share.
 // The board painters and formatters are index.html's own, handed over in startApp, so none is written twice.
 
-/** GET with If-None-Match. A 304, or a 200 with the same body (tags turn every minute), reports changed: false. */
-async function readCachedWithEtag(path) {
+/** Cache first: a cached answer is served from memory while its minute lasts (make.fun's answers and ETags are bound to
+ * the minute), and once the minute has turned it is still served at once while a re-read runs (stale-while-revalidate). */
+function readCached(path, onChange) {
   const cached = responseCache.get(path);
-  const headers = cached?.etag ? { 'if-none-match': cached.etag } : {};
-  const response = await fetch(MAKEFUN_ORIGIN + path, { headers, cache: 'no-store', signal: AbortSignal.timeout(30_000) }).catch(() => {
-    throw new ApiError(0);
-  });
-  if (response.status === 304 && cached) {
-    cached.fetchedAt = Date.now();
-    return { data: cached.data, changed: false };
-  }
-  if (!response.ok) throw new ApiError(response.status);
-  const text = await response.text();
-  const fresh = { text, etag: response.headers.get('etag'), fetchedAt: Date.now() };
-  if (cached?.text === text) {
-    Object.assign(cached, fresh);
-    return { data: cached.data, changed: false };
-  }
-  const data = JSON.parse(text);
-  responseCache.set(path, { ...fresh, data });
-  return { data, changed: true };
+  if (!cached) return revalidateOnce(path).then((result) => result.data);
+  countApiRequestsAndCacheHits('cached');
+  revalidateIfStale(path, onChange);
+  return Promise.resolve(cached.data);
 }
 
-/** Re-read `path` every minute while the tab is visible (and on return to it); onChange only when the answer changed. */
-export function revalidateWhileVisible(path, onChange) {
-  const revalidate = () => document.visibilityState === 'visible' && revalidateOnce(path).then((r) => r.changed && onChange(r.data), () => {});
-  const timer = setInterval(revalidate, REVALIDATE_EVERY_MS);
+/** The header's API pill: real network requests, reads served from memory, re-reads and how many of them found nothing new. */
+function countApiRequestsAndCacheHits(kind) {
+  apiTraffic[kind]++;
+  if (kind === 'revalidated') apiTraffic.requests++;
+  const { requests, cached, revalidated, unchanged } = apiTraffic;
+  setText(apiPill, [`API: ${requests} request${requests === 1 ? '' : 's'}`, `${cached} served from cache`, revalidated && `${revalidated} revalidated`, unchanged && `${unchanged} unchanged, not repainted`].filter(Boolean).join(' · '));
+}
+
+/** Re-read `path` once a minute, just after the minute turns, while the tab is visible (and on return to it). */
+function revalidateWhileVisible(path, onChange) {
+  const revalidate = revalidateIfStale.bind(null, path, onChange);
+  const timer = setInterval(revalidate, CHECK_STALE_EVERY_MS);
   document.addEventListener('visibilitychange', revalidate);
   return () => {
     clearInterval(timer);
@@ -57,19 +52,13 @@ function tickCountdownsInPlace() {
   }
 }
 
-/** Stale-while-revalidate: the cached answer at once, a background re-check when it is older than FRESH_FOR_MS. */
-export function readCached(path, onChange) {
-  const cached = responseCache.get(path);
-  if (!cached) return revalidateOnce(path).then((result) => result.data);
-  if (Date.now() - cached.fetchedAt > FRESH_FOR_MS) revalidateOnce(path).then((r) => r.changed && onChange?.(r.data), () => {});
-  return Promise.resolve(cached.data);
-}
-
 export function startApp(handoff) {
   ({ formatUsd, formatTimeLeft, livePotUsd, isTakingEntries, setText } = handoff);
   firstFrame = handoff;
-  if (handoff.firstRead) responseCache.set(apiPaths.board(), { ...handoff.firstRead, fetchedAt: Date.now() });
+  if (handoff.firstRead) responseCache.set(apiPaths.board(), { data: handoff.firstRead.data, signature: JSON.stringify(handoff.firstRead.data), fetchedAt: Date.now() });
   adoptViewStyles(APP_CSS);
+  document.querySelector('body>header>a').after(apiPill);
+  if (handoff.firstRead !== null) countApiRequestsAndCacheHits('requests');
   mountProfileSearch(document.querySelector('body>header'));
   viewRoot.addEventListener('pointerover', prefetchBountyOnHover);
   addEventListener('hashchange', renderCurrentRoute);
@@ -124,7 +113,8 @@ async function renderCurrentRoute() {
   if (!adoptsFirstFrame) viewRoot.replaceChildren(renderSkeleton(name));
   if (generation > 1) scrollTo(0, 0);
   const route = { isCurrent: () => generation === activeRoute.generation, whenCurrent: (fn) => (...args) => route.isCurrent() && fn(...args) };
-  readCached(apiPaths[name](params)).catch(() => {});
+  const path = apiPaths[name](params);
+  if (!responseCache.has(path)) revalidateOnce(path).catch(() => {});
   try {
     const unmount = await (await ROUTES[name]())(viewRoot, params, route);
     if (!route.isCurrent()) return unmount?.();
@@ -137,6 +127,8 @@ async function renderCurrentRoute() {
   window.__shotReady = true;
 }
 
+export { readCached, revalidateWhileVisible };
+
 /** The four API reads, one per surface. */
 export const apiPaths = {
   board: () => '/api/competitions?status=open&activity=times',
@@ -148,7 +140,7 @@ export const apiPaths = {
 /** One view per route, each import()ed on first use. */
 const ROUTES = {
   board: async () => mountBoardView,
-  bounty: async () => (await import('./bounty-view.js')).mountBountyView,
+  bounty: async () => (await import('./bounty-view.js')).mountBountyPageWithBoardBeside,
   leaderboard: async () => (await import('./leaderboard-view.js')).mountLeaderboardView,
   profile: async () => (await import('./profile-view.js')).mountProfileView,
 };
@@ -158,10 +150,11 @@ export let formatUsd, formatTimeLeft, livePotUsd, isTakingEntries, setText;
 let firstFrame = {};
 
 export const MAKEFUN_ORIGIN = 'https://make.fun';
-const FRESH_FOR_MS = 20_000,
-  REVALIDATE_EVERY_MS = 60_000,
+const CHECK_STALE_EVERY_MS = 15_000,
   responseCache = new Map(),
-  inflightRequests = new Map();
+  inflightRequests = new Map(),
+  apiTraffic = { requests: 0, cached: 0, revalidated: 0, unchanged: 0 },
+  apiPill = el('output', { className: 'api-pill', title: 'Counted live in app.js by fetchIntoCache, readCached and peekCached' });
 
 class ApiError extends Error {
   constructor(status) {
@@ -170,12 +163,44 @@ class ApiError extends Error {
   }
 }
 
+/** Re-read when the tab is visible and the cached answer's minute has turned; onChange only when the answer changed. */
+function revalidateIfStale(path, onChange) {
+  const minute = (time) => Math.floor(time / 60_000);
+  if (document.hidden || minute(responseCache.get(path)?.fetchedAt) === minute(Date.now())) return;
+  revalidateOnce(path).then((r) => r.changed && onChange?.(r.data), () => {});
+}
+
+/** GET into the cache, counted in the API pill. No If-None-Match: make.fun's 304 carries no CORS header, so a browser could
+ * not read it (and the header costs a preflight). An answer that matches the cached one reports changed: false. */
+async function fetchIntoCache(path) {
+  const cached = responseCache.get(path);
+  countApiRequestsAndCacheHits(cached ? 'revalidated' : 'requests');
+  const response = await fetch(MAKEFUN_ORIGIN + path, { cache: 'no-store', signal: AbortSignal.timeout(30_000) }).catch(() => {
+    throw new ApiError(0);
+  });
+  if (!response.ok) throw new ApiError(response.status);
+  const data = await response.json();
+  const signature = JSON.stringify(data);
+  if (cached?.signature === signature) {
+    cached.fetchedAt = Date.now();
+    countApiRequestsAndCacheHits('unchanged');
+    return { data: cached.data, changed: false };
+  }
+  responseCache.set(path, { data, signature, fetchedAt: Date.now() });
+  return { data, changed: true };
+}
+
 function revalidateOnce(path) {
-  if (!inflightRequests.has(path)) inflightRequests.set(path, readCachedWithEtag(path).finally(() => inflightRequests.delete(path)));
+  if (!inflightRequests.has(path)) inflightRequests.set(path, fetchIntoCache(path).finally(() => inflightRequests.delete(path)));
   return inflightRequests.get(path);
 }
 
-export const peekCached = (path) => responseCache.get(path)?.data;
+/** The cached answer if there is one (no request): counted as served from cache when it is. */
+export function peekCached(path) {
+  const data = responseCache.get(path)?.data;
+  if (data) countApiRequestsAndCacheHits('cached');
+  return data;
+}
 
 
 function prefetchBountyOnHover(event) {
@@ -360,6 +385,7 @@ body>header{flex-wrap:wrap}
 .button:hover{border-color:var(--accent)}
 .button:disabled{opacity:.45;cursor:default}
 .button-primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.api-pill{padding:4px 12px;border-radius:999px;background:#fff;color:#14121f;font-size:.95rem;font-weight:700;font-variant-numeric:tabular-nums}
 .profile-search{margin-left:auto;display:flex;align-items:center;gap:6px}
 .profile-search .input{width:11rem;background:#fff2;border-color:#fff4;color:#fff}
 .profile-search .input::placeholder{color:#fffa}
