@@ -1,40 +1,49 @@
 // A bounty's leaderboard (#/bounty/<slug>/leaderboard), one read with ?rows=first: the top rows whole, every other row
-// as the light record a ranked list needs. Rows are paged LEADERBOARD_PAGE_SIZE at a time through one fixed pool of
-// <tr> elements whose cells are rewritten in place, so paging, filtering or a revalidation never rebuilds the table.
+// as the light record a ranked list needs. Every row is reachable by scrolling, but only the rows in view (plus
+// OVERSCAN_ROWS each side) exist: a pool of fixed-height ROW_HEIGHT rows is moved over one spacer and rewritten in
+// place, so scrolling, filtering or a revalidation never rebuilds the list.
 
-import { adoptViewStyles, apiPaths, bountyHref, el, formatCount, profileHref, readCached, revalidateWhileVisible, setText } from './app.js';
-import { absoluteAssetUrl, avatarImage, breadcrumb, formatScore, formatTimeAgo } from './view-kit.js';
+import { absoluteAssetUrl, adoptViewStyles, apiPaths, avatarImage, bountyHref, breadcrumb, el, formatCount, formatScore, formatTimeAgo, profileHref, readCached, revalidateWhileVisible, setText } from './app.js';
 
-const LEADERBOARD_PAGE_SIZE = 50;
+const ROW_HEIGHT = 52;
+const OVERSCAN_ROWS = 6;
 
-/** Show one page of the (filtered) rows by rewriting the pooled <tr>s; the rest of the pool hides. */
-function paginateLeaderboardRows(view, page) {
-  const { state, rowPool } = view;
-  const rows = state.query ? state.rows.filter((row) => `${row.handle} ${row.title}`.toLowerCase().includes(state.query)) : state.rows;
-  const pageCount = Math.max(1, Math.ceil(rows.length / LEADERBOARD_PAGE_SIZE));
-  state.page = Math.min(Math.max(0, page), pageCount - 1);
-  const pageRows = rows.slice(state.page * LEADERBOARD_PAGE_SIZE, (state.page + 1) * LEADERBOARD_PAGE_SIZE);
-  rowPool.forEach((pooled, index) => (pageRows[index] ? fillPooledRow(pooled, pageRows[index], state.rankColumn) : (pooled.row.hidden = true)));
-  view.table.hidden = !pageRows.length;
-  view.pager.hidden = pageCount <= 1;
-  view.previousButton.disabled = state.page === 0;
-  view.nextButton.disabled = state.page >= pageCount - 1;
-  setText(view.pageLabel, `Page ${state.page + 1} of ${formatCount(pageCount)}`);
-  view.emptyState.hidden = pageRows.length > 0;
+/** Render only the rows that intersect the viewport (window scroll), reusing pooled row elements. */
+function virtualiseLeaderboardRows(view) {
+  const { state } = view;
+  const rows = state.visibleRows;
+  view.spacer.style.height = `${rows.length * ROW_HEIGHT}px`;
+  const top = view.spacer.getBoundingClientRect().top;
+  const first = Math.max(0, Math.floor(-top / ROW_HEIGHT) - OVERSCAN_ROWS);
+  const last = Math.min(rows.length, Math.ceil((innerHeight - top) / ROW_HEIGHT) + OVERSCAN_ROWS);
+  while (view.rowPool.length < last - first) view.rowPool.push(createPooledRow(view.spacer));
+  const inView = new Set();
+  for (let index = first; index < last; index++) {
+    const pooled = view.rowPool[index % view.rowPool.length];
+    inView.add(pooled);
+    pooled.row.hidden = false;
+    if (pooled.index === index && pooled.generation === state.generation) continue;
+    Object.assign(pooled, { index, generation: state.generation });
+    pooled.row.style.transform = `translateY(${index * ROW_HEIGHT}px)`;
+    pooled.row.setAttribute('aria-rowindex', String(index + 2));
+    fillPooledRow(pooled, rows[index], state.rankColumn);
+  }
+  for (const pooled of view.rowPool) if (!inView.has(pooled)) pooled.row.hidden = true;
+  view.list.setAttribute('aria-rowcount', String(rows.length + 1));
+  view.emptyState.hidden = rows.length > 0;
   setText(view.emptyState, state.query ? 'No entry matches that filter.' : 'No ranked entries yet: scores show here once entries are judged.');
 }
 
 function fillPooledRow({ row, cells }, entry, rankColumn) {
-  row.hidden = false;
-  row.className = entry.rank <= 3 ? 'podium' : '';
+  row.className = `lb-row${entry.rank <= 3 ? ' podium' : ''}`;
   setText(cells.rank, entry.rank ?? '—');
   setText(cells.handle, entry.handle ? `@${entry.handle}` : 'anonymous');
   if (entry.handle) cells.handle.href = profileHref(entry.handle);
   else cells.handle.removeAttribute('href');
   const avatarUrl = absoluteAssetUrl(entry.image) || '';
-  if (cells.avatarSlot.dataset.src !== avatarUrl) {
+  if (cells.avatarSlot.dataset.src !== avatarUrl || !cells.avatarSlot.firstChild) {
     cells.avatarSlot.dataset.src = avatarUrl;
-    cells.avatarSlot.replaceChildren(avatarImage(avatarUrl, entry.handle, 24));
+    cells.avatarSlot.replaceChildren(avatarImage(avatarUrl, entry.handle, 28));
   }
   cells.house.hidden = !entry.house;
   setText(cells.title, entry.title || '');
@@ -47,13 +56,23 @@ function fillPooledRow({ row, cells }, entry, rankColumn) {
 
 export async function mountLeaderboardView(container, { slug }, route) {
   const view = buildLeaderboardLayout(slug);
-  const goTo = (page) => paginateLeaderboardRows(view, page);
-  view.previousButton.onclick = () => goTo(view.state.page - 1);
-  view.nextButton.onclick = () => goTo(view.state.page + 1);
-  view.search.addEventListener('input', () => {
-    view.state.query = view.search.value.trim().toLowerCase();
-    goTo(0);
-  });
+  let frameRequested = false;
+  const scheduleVirtualise = () => {
+    if (frameRequested) return;
+    frameRequested = true;
+    requestAnimationFrame(() => {
+      frameRequested = false;
+      virtualiseLeaderboardRows(view);
+    });
+  };
+  const applyFilter = () => {
+    const { state } = view;
+    state.query = view.search.value.trim().toLowerCase();
+    state.visibleRows = state.query ? state.rows.filter((row) => `${row.handle} ${row.title}`.toLowerCase().includes(state.query)) : state.rows;
+    state.generation++;
+    virtualiseLeaderboardRows(view);
+  };
+  view.search.addEventListener('input', applyFilter);
 
   function applyLeaderboardData(board) {
     Object.assign(view.state, normalizeLeaderboardRows(board));
@@ -64,7 +83,7 @@ export async function mountLeaderboardView(container, { slug }, route) {
     setText(view.scoreHeader, rankColumn?.title || 'Score');
     const phase = board.phase;
     setText(view.summary, [`${formatCount(rows.length)} ranked ${rows.length === 1 ? 'entry' : 'entries'}`, phase?.title && `${phase.title} phase`, phase?.placements_held && 'places unofficial until results publish'].filter(Boolean).join(' · '));
-    goTo(view.state.page);
+    applyFilter();
   }
 
   const onChange = (fresh) => route.isCurrent() && applyLeaderboardData(fresh);
@@ -72,7 +91,14 @@ export async function mountLeaderboardView(container, { slug }, route) {
   if (!route.isCurrent()) return;
   container.replaceChildren(view.page);
   applyLeaderboardData(board);
-  return revalidateWhileVisible(apiPaths.leaderboard({ slug }), onChange);
+  addEventListener('scroll', scheduleVirtualise, { passive: true });
+  addEventListener('resize', scheduleVirtualise);
+  const stopRevalidating = revalidateWhileVisible(apiPaths.leaderboard({ slug }), onChange);
+  return () => {
+    stopRevalidating();
+    removeEventListener('scroll', scheduleVirtualise);
+    removeEventListener('resize', scheduleVirtualise);
+  };
 }
 
 /** Both row shapes the API sends (whole and light) as one list sorted by rank. */
@@ -86,56 +112,59 @@ export function normalizeLeaderboardRows(board) {
   return { rankColumn, rows: rows.sort((a, b) => (a.rank ?? Infinity) - (b.rank ?? Infinity)) };
 }
 
-function createPooledRow() {
-  const cells = { rank: el('td', { className: 'col-rank' }), avatarSlot: el('span', { className: 'avatar-slot' }), handle: el('a', { className: 'entrant-handle' }), house: el('span', { className: 'house-badge', hidden: true }, 'house'), title: el('td', { className: 'col-title' }), score: el('td', { className: 'col-score' }), interval: el('td', { className: 'col-interval' }), received: el('td', { className: 'col-received' }) };
-  const row = el('tr', null, cells.rank, el('td', { className: 'col-entrant' }, cells.avatarSlot, cells.handle, cells.house), cells.title, cells.score, cells.interval, cells.received);
-  return { row, cells };
+function createPooledRow(spacer) {
+  const cell = (className, ...children) => el('span', { role: 'cell', className }, ...children);
+  const cells = { rank: cell('col-rank'), avatarSlot: el('span', { className: 'avatar-slot' }), handle: el('a', { className: 'entrant-handle' }), house: el('span', { className: 'house-badge', hidden: true }, 'house'), title: el('span', { className: 'entrant-title' }), score: cell('col-score'), interval: cell('col-interval'), received: cell('col-received') };
+  const entrant = cell('col-entrant', cells.avatarSlot, el('span', { className: 'entrant-text' }, el('span', { className: 'entrant-line' }, cells.handle, cells.house), cells.title));
+  const row = el('div', { role: 'row', className: 'lb-row' }, cells.rank, entrant, cells.score, cells.interval, cells.received);
+  spacer.append(row);
+  return { row, cells, index: -1, generation: -1 };
 }
 
 function buildLeaderboardLayout(slug) {
   const view = {
-    state: { page: 0, query: '', rows: [], rankColumn: null },
-    rowPool: Array.from({ length: LEADERBOARD_PAGE_SIZE }, createPooledRow),
+    state: { query: '', rows: [], visibleRows: [], rankColumn: null, generation: 0 },
+    rowPool: [],
     boardTitle: el('a', { href: bountyHref(slug) }, slug),
     summary: el('p', { className: 'leaderboard-summary' }),
-    scoreHeader: el('th', { scope: 'col', className: 'col-score' }, 'Score'),
+    scoreHeader: el('span', { role: 'columnheader', className: 'col-score' }, 'Score'),
     search: el('input', { type: 'search', className: 'input', placeholder: 'Filter by handle or entry', 'aria-label': 'Filter entries' }),
-    pageLabel: el('span', { className: 'pager-label', 'aria-live': 'polite' }),
-    previousButton: el('button', { type: 'button', className: 'button' }, '← Previous'),
-    nextButton: el('button', { type: 'button', className: 'button' }, 'Next →'),
+    spacer: el('div', { className: 'lb-spacer', role: 'rowgroup' }),
     emptyState: el('p', { className: 'empty-state', hidden: true }),
   };
-  const th = (label, className) => el('th', { scope: 'col', className }, label);
-  view.table = el('table', { className: 'leaderboard-table' }, el('thead', null, el('tr', null, th('#', 'col-rank'), th('Entrant'), th('Entry', 'col-title'), view.scoreHeader, th('90% interval', 'col-interval'), th('Entered', 'col-received'))), el('tbody', null, view.rowPool.map((pooled) => pooled.row)));
-  view.pager = el('nav', { className: 'pager', 'aria-label': 'Leaderboard pages' }, view.previousButton, view.pageLabel, view.nextButton);
+  const header = (label, className) => el('span', { role: 'columnheader', className }, label);
+  view.list = el('div', { role: 'table', className: 'lb-table', 'aria-label': 'Leaderboard' }, el('div', { role: 'row', className: 'lb-row lb-head', 'aria-rowindex': '1' }, header('#', 'col-rank'), header('Entrant · entry', 'col-entrant'), view.scoreHeader, header('90% interval', 'col-interval'), header('Entered', 'col-received')), view.spacer);
   view.page = el(
     'section',
     null,
     breadcrumb(view.boardTitle, el('span', null, 'Leaderboard')),
     el('div', { className: 'view-heading' }, el('h1', { tabIndex: -1 }, 'Leaderboard'), view.summary),
     el('div', { className: 'board-toolbar' }, view.search, el('a', { className: 'button', href: bountyHref(slug) }, 'Bounty details')),
-    el('div', { className: 'table-scroll' }, view.table),
+    view.list,
     view.emptyState,
-    view.pager,
   );
   return view;
 }
 
 adoptViewStyles(`
 .leaderboard-summary{margin:0;color:var(--muted)}
-.leaderboard-table{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius)}
-.leaderboard-table tbody tr:hover{background:var(--surface-2)}
-.col-rank{width:3.5rem;text-align:right;font-weight:800}
+.lb-table{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;font-variant-numeric:tabular-nums}
+.lb-row{display:grid;grid-template-columns:3.5rem minmax(0,1fr) 8rem 10rem 6rem;align-items:center;gap:12px;height:${ROW_HEIGHT}px;padding:0 14px;border-bottom:1px solid var(--border);box-sizing:border-box}
+.lb-spacer{position:relative;contain:strict;width:100%}
+.lb-spacer .lb-row{position:absolute;top:0;left:0;right:0}
+.lb-spacer .lb-row:hover{background:var(--surface-2)}
+.lb-head{height:36px;background:var(--surface-2);color:var(--muted);font-size:.75rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
+.col-rank{text-align:right;font-weight:800;font-size:1.05rem}
 .podium .col-rank{color:var(--gold)}
-.col-entrant{white-space:nowrap}
-.avatar-slot{display:inline-flex;vertical-align:middle;margin-right:8px}
-.entrant-handle{font-weight:600}
+.col-entrant{display:flex;align-items:center;gap:10px;min-width:0}
+.avatar-slot{display:inline-flex}
+.entrant-text{display:grid;min-width:0}
+.entrant-line,.entrant-title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.entrant-handle{font-weight:700}
+.entrant-title{color:var(--muted);font-size:.85rem}
 .house-badge{margin-left:6px;padding:1px 6px;border-radius:6px;background:var(--surface-2);color:var(--muted);font-size:.7rem;font-weight:700;text-transform:uppercase}
-.col-title{max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.col-score{font-weight:800;white-space:nowrap}
-.col-interval,.col-received{color:var(--muted);font-size:.9rem;white-space:nowrap}
-.pager{display:flex;justify-content:center;align-items:center;gap:12px;margin-top:16px}
-.pager-label{color:var(--muted);font-variant-numeric:tabular-nums}
-@media (max-width:900px){.col-interval{display:none}}
-@media (max-width:640px){.leaderboard-table .col-title,.col-received{display:none}.col-entrant{white-space:normal;overflow-wrap:anywhere}.col-rank{width:2.5rem}}
+.col-score{font-weight:800;white-space:nowrap;text-align:right}
+.col-interval,.col-received{color:var(--muted);font-size:.88rem;white-space:nowrap}
+.lb-head .col-score{white-space:normal;line-height:1.1}
+@media (max-width:760px){.lb-row{grid-template-columns:2.2rem minmax(0,1fr) 4.6rem;gap:8px;padding:0 10px}.col-interval,.col-received{display:none}}
 `);

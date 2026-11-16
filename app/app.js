@@ -1,5 +1,19 @@
-// First load: make.fun API behind an ETag cache, the board (#/), the router; other views are import()ed on demand.
-// The functions that do the work come first; the constants and small helpers they use follow.
+// Loaded by index.html's first-frame script once the board is on screen: the ETag cache, the router, the board's
+// controls and in-place updates, the countdown ticker, and the helpers the lazily imported views share.
+// The board painters and formatters are index.html's own, handed over in startApp, so none is written twice.
+
+export function startApp(handoff) {
+  ({ formatUsd, formatTimeLeft, livePotUsd, isTakingEntries, setText } = handoff);
+  firstFrame = handoff;
+  if (handoff.firstRead) responseCache.set(apiPaths.board(), { ...handoff.firstRead, fetchedAt: Date.now() });
+  adoptViewStyles(APP_CSS);
+  mountProfileSearch(document.querySelector('body>header'));
+  viewRoot.addEventListener('pointerover', prefetchBountyOnHover);
+  addEventListener('hashchange', renderCurrentRoute);
+  tickCountdownsInPlace();
+  setInterval(tickCountdownsInPlace, 1000);
+  renderCurrentRoute().then(warmLaterViewsWhenIdle);
+}
 
 /** GET with If-None-Match. A 304, or a 200 with the same body (tags turn every minute), reports changed: false. */
 async function readCachedWithEtag(path) {
@@ -24,6 +38,14 @@ async function readCachedWithEtag(path) {
   return { data, changed: true };
 }
 
+/** Stale-while-revalidate: the cached answer at once, a background re-check when it is older than FRESH_FOR_MS. */
+export function readCached(path, onChange) {
+  const cached = responseCache.get(path);
+  if (!cached) return revalidateOnce(path).then((result) => result.data);
+  if (Date.now() - cached.fetchedAt > FRESH_FOR_MS) revalidateOnce(path).then((r) => r.changed && onChange?.(r.data), () => {});
+  return Promise.resolve(cached.data);
+}
+
 export function revalidateWhileVisible(path, onChange) {
   const revalidate = () => document.visibilityState === 'visible' && revalidateOnce(path).then((r) => r.changed && onChange(r.data), () => {});
   const timer = setInterval(revalidate, REVALIDATE_EVERY_MS);
@@ -34,75 +56,67 @@ export function revalidateWhileVisible(path, onChange) {
   };
 }
 
+/** One 1 s timer for every [data-deadline] node on the page: rewrites its text and urgency, never its element. */
+function tickCountdownsInPlace() {
+  if (document.hidden) return;
+  for (const node of document.querySelectorAll('[data-deadline]')) {
+    const ms = new Date(node.dataset.deadline) - Date.now();
+    setText(node, formatTimeLeft(node.dataset.deadline));
+    const urgency = ms < 3_600_000 ? 'urgent' : ms < 86_400_000 ? 'soon' : '';
+    if (node.dataset.urgency !== urgency) node.dataset.urgency = urgency;
+  }
+}
+
+/** The board (#/): adopts index.html's first frame when it is on screen, else paints it, then adds the controls. */
+async function mountBoardView(container, _params, route) {
+  document.title = 'Live bounties · make.fun';
+  const onChange = (fresh) => route.isCurrent() && applyBoardData(fresh);
+  const data = await readCached(apiPaths.board(), onChange);
+  if (!route.isCurrent()) return;
+  const frame = firstFrame.frame?.list.isConnected ? firstFrame.frame : firstFrame.paintBoardFirstFrame(container, data.items.filter(isTakingEntries));
+  firstFrame.frame = null;
+  let liveBounties = [];
+  const cards = new Map();
+  const resultCount = el('p', { className: 'board-result-count', 'aria-live': 'polite' });
+  const emptyState = el('p', { className: 'empty-state', hidden: true }, 'No live bounty matches. Clear the search or pick another category.');
+  const { toolbar, chips } = buildBoardToolbar(applyBoardFilters);
+  frame.list.before(toolbar, chips, resultCount);
+  frame.list.after(emptyState);
+
+  function applyBoardFilters() {
+    renderCategoryChips(chips, liveBounties);
+    const visible = liveBounties.filter((bounty) => (boardFilters.category === 'all' || bounty.category === boardFilters.category) && matchesSearch(bounty, boardFilters.query));
+    patchBoardCardsInPlace(frame.list, visible.sort(BOARD_SORTS[boardFilters.sort][1]).map((bounty) => cards.get(bounty.slug)));
+    emptyState.hidden = visible.length > 0;
+    setText(resultCount, visible.length === liveBounties.length ? '' : `Showing ${visible.length} of ${liveBounties.length}`);
+  }
+
+  function applyBoardData(fresh) {
+    liveBounties = fresh.items.filter(isTakingEntries);
+    for (const bounty of liveBounties) cards.set(bounty.slug, firstFrame.patchBoardCardInPlace(bounty));
+    firstFrame.writeBoardTotals(frame, liveBounties);
+    applyBoardFilters();
+  }
+
+  applyBoardData(data);
+  return revalidateWhileVisible(apiPaths.board(), onChange);
+}
+
+/** Put the cards in order by moving the existing nodes; a card that drops out is detached, never destroyed. */
 function patchBoardCardsInPlace(list, cards) {
   cards.forEach((card, index) => list.children[index] !== card && list.insertBefore(card, list.children[index] || null));
   while (list.children.length > cards.length) list.lastElementChild.remove();
 }
 
-function tickCountdownsInPlace() {
-  for (const [node, deadline] of countdowns.nodes) {
-    if (!node.isConnected) continue;
-    setText(node, formatTimeLeft(deadline));
-    const urgency = deadlineUrgency(deadline);
-    if (node.dataset.urgency !== urgency) node.dataset.urgency = urgency;
-  }
-}
-
-async function mountBoardView(container, _params, route) {
-  document.title = 'Live bounties · make.fun';
-  let liveBounties = [];
-  const totals = { live: el('strong'), pots: el('strong'), entries: el('strong') };
-  const list = el('ul', { className: 'bounty-grid' });
-  const resultCount = el('p', { className: 'board-result-count', 'aria-live': 'polite' });
-  const emptyState = el('p', { className: 'empty-state', hidden: true }, 'No live bounty matches. Clear the search or pick another category.');
-  const { toolbar, chips } = buildBoardToolbar(applyBoardFilters);
-
-  function applyBoardFilters() {
-    renderCategoryChips(chips, liveBounties);
-    const visible = liveBounties
-      .filter((bounty) => boardFilters.category === 'all' || (bounty.category || 'Other') === boardFilters.category)
-      .filter((bounty) => !boardFilters.query || matchesSearch(bounty, boardFilters.query))
-      .sort(BOARD_SORTS[boardFilters.sort][1]);
-    patchBoardCardsInPlace(list, visible.map((bounty) => bountyCards.get(bounty.slug).card));
-    emptyState.hidden = visible.length > 0;
-    setText(resultCount, visible.length === liveBounties.length ? '' : `Showing ${visible.length} of ${liveBounties.length}`);
-  }
-
-  function applyBoardData(data) {
-    liveBounties = (data.items || []).filter(isTakingEntries);
-    for (const bounty of liveBounties) {
-      if (!bountyCards.has(bounty.slug)) bountyCards.set(bounty.slug, createBountyCard(bounty.slug));
-      fillBountyCard(bountyCards.get(bounty.slug), bounty);
-    }
-    setText(totals.live, `${liveBounties.length} ${liveBounties.length === 1 ? 'bounty' : 'bounties'}`);
-    setText(totals.pots, formatUsd(Math.round(liveBounties.reduce((sum, b) => sum + livePotUsd(b), 0))));
-    setText(totals.entries, formatCount(liveBounties.reduce((sum, b) => sum + (b.submissionCount || 0), 0)));
-    applyBoardFilters();
-  }
-
-  const onChange = (fresh) => route.isCurrent() && applyBoardData(fresh);
-  const data = await readCached(apiPaths.board(), onChange);
-  if (!route.isCurrent()) return;
-  const summary = el('p', { className: 'board-totals' }, totals.live, ' taking entries · ', totals.pots, ' in live pots · ', totals.entries, ' entries');
-  container.replaceChildren(el('section', null, el('div', { className: 'view-heading' }, el('h1', { tabIndex: -1 }, 'Live bounties'), summary), toolbar, chips, resultCount, list, emptyState));
-  applyBoardData(data);
-  return revalidateWhileVisible(apiPaths.board(), onChange);
-}
-
 async function renderCurrentRoute() {
   const generation = ++activeRoute.generation;
-  const isFirstRender = generation === 1;
   window.__shotReady = false;
   activeRoute.unmount?.();
   activeRoute.unmount = null;
-  stopAllCountdowns();
   const { name, params } = parseHashRoute(location.hash);
-  for (const link of document.querySelectorAll('[data-nav]')) {
-    if (link.dataset.nav === name) link.setAttribute('aria-current', 'page');
-    else link.removeAttribute('aria-current');
-  }
-  viewRoot.replaceChildren(renderSkeleton(name));
-  if (!isFirstRender) scrollTo(0, 0);
+  const adoptsFirstFrame = generation === 1 && firstFrame.frame;
+  if (!adoptsFirstFrame) viewRoot.replaceChildren(renderSkeleton(name));
+  if (generation > 1) scrollTo(0, 0);
   const route = { isCurrent: () => generation === activeRoute.generation };
   readCached(apiPaths[name](params)).catch(() => {});
   try {
@@ -113,9 +127,13 @@ async function renderCurrentRoute() {
     if (!route.isCurrent()) return;
     viewRoot.replaceChildren(renderErrorState(error, renderCurrentRoute));
   }
-  if (!isFirstRender) viewRoot.querySelector('h1')?.focus({ preventScroll: true });
+  if (generation > 1) viewRoot.querySelector('h1')?.focus({ preventScroll: true });
   window.__shotReady = true;
 }
+
+/** Handed over by index.html in startApp (live bindings, so every view module reads index.html's own functions). */
+export let formatUsd, formatTimeLeft, livePotUsd, isTakingEntries, setText;
+let firstFrame = {};
 
 export const MAKEFUN_ORIGIN = 'https://make.fun';
 const FRESH_FOR_MS = 20_000;
@@ -135,13 +153,6 @@ function revalidateOnce(path) {
   return inflightRequests.get(path);
 }
 
-export function readCached(path, onChange) {
-  const cached = responseCache.get(path);
-  if (!cached) return revalidateOnce(path).then((result) => result.data);
-  if (Date.now() - cached.fetchedAt > FRESH_FOR_MS) revalidateOnce(path).then((r) => r.changed && onChange?.(r.data), () => {});
-  return Promise.resolve(cached.data);
-}
-
 export const peekCached = (path) => responseCache.get(path)?.data;
 
 export const apiPaths = {
@@ -151,9 +162,10 @@ export const apiPaths = {
   profile: ({ handle }) => `/api/profiles/${encodeURIComponent(handle)}`,
 };
 
-function prefetchBounty(slug) {
-  const path = apiPaths.bounty({ slug });
-  if (!responseCache.has(path)) revalidateOnce(path).catch(() => {});
+function prefetchBountyOnHover(event) {
+  const slug = event.target.closest?.('a[href^="#/bounty/"]')?.hash.split('/')[2];
+  const path = slug && apiPaths.bounty({ slug: decodeURIComponent(slug) });
+  if (path && !responseCache.has(path)) revalidateOnce(path).catch(() => {});
 }
 
 export function el(tag, props, ...children) {
@@ -170,105 +182,71 @@ export function el(tag, props, ...children) {
   return node;
 }
 
-export function setText(node, text) {
-  const value = String(text ?? '');
-  if (node.textContent !== value) node.textContent = value;
-}
-
 export function adoptViewStyles(cssText) {
   const sheet = new CSSStyleSheet();
   sheet.replaceSync(cssText);
   document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
 }
 
-const USD_FORMATS = [0, 2].map((digits) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: digits, maximumFractionDigits: digits }));
-
-export function formatUsd(value) {
-  const amount = Number(value);
-  if (!Number.isFinite(amount)) return '—';
-  return USD_FORMATS[Number.isInteger(amount) ? 0 : 1].format(amount);
-}
-
 export const formatCount = (n) => (Number(n) || 0).toLocaleString('en-US');
-export const livePotUsd = (bounty) => Number(bounty.potUsd ?? bounty.rewardAmount ?? 0);
 export const entryFeeUsd = (bounty) => Number(bounty.entryFeeUsd || 0);
 export const formatEntryFee = (bounty) => (entryFeeUsd(bounty) > 0 ? formatUsd(bounty.entryFeeUsd) : 'Free');
-
-export function isTakingEntries(bounty) {
-  return bounty.status !== 'resolved' && bounty.status !== 'closed' && new Date(bounty.deadline) > Date.now();
-}
-
-export function formatTimeLeft(deadline) {
-  const s = Math.floor((new Date(deadline) - Date.now()) / 1000);
-  if (!(s > 0)) return 'Closed';
-  const pad = (n) => String(n).padStart(2, '0');
-  const [days, hours, minutes] = [Math.floor(s / 86400), Math.floor((s % 86400) / 3600), Math.floor((s % 3600) / 60)];
-  return days > 0 ? `${days}d ${hours}h ${pad(minutes)}m` : `${hours}h ${pad(minutes)}m ${pad(s % 60)}s`;
-}
-
-function deadlineUrgency(deadline) {
-  const ms = new Date(deadline) - Date.now();
-  return ms <= 0 ? 'is-closed' : ms < 3_600_000 ? 'is-urgent' : ms < 86_400_000 ? 'is-soon' : '';
-}
-
-const countdowns = { nodes: new Map(), timer: 0 };
-
-export function trackCountdown(node, deadline) {
-  countdowns.nodes.set(node, deadline);
-  setText(node, formatTimeLeft(deadline));
-  node.dataset.urgency = deadlineUrgency(deadline);
-  countdowns.timer ||= setInterval(tickCountdownsInPlace, 1000);
-}
-
-function stopAllCountdowns() {
-  countdowns.nodes.clear();
-  clearInterval(countdowns.timer);
-  countdowns.timer = 0;
-}
-
+export const paidPlaces = (bounty) => bounty.rewardsNow?.length || Object.keys(bounty.rewards || {}).length;
 export const bountyHref = (slug) => `#/bounty/${encodeURIComponent(slug)}`;
 export const leaderboardHref = (slug) => `#/bounty/${encodeURIComponent(slug)}/leaderboard`;
 export const profileHref = (handle) => `#/u/${encodeURIComponent(handle)}`;
 
+/** A stat: a label above a prominent value. */
+export function statBlock(label, value, className = '') {
+  const valueNode = el('dd', { className: 'stat-value' }, value);
+  return { node: el('div', { className: `stat ${className}` }, el('dt', { className: 'stat-label' }, label), valueNode), valueNode };
+}
+
+/** 'Bounties / <crumb> / <crumb>': the way back to the board from any page. */
+export function breadcrumb(...crumbs) {
+  return el('nav', { className: 'breadcrumb', 'aria-label': 'Breadcrumb' }, el('a', { href: '#/' }, 'Bounties'), crumbs.flatMap((crumb) => [' / ', crumb]));
+}
+
+/** A profile picture: crossorigin set before src (make.fun sends CORP same-origin), initials when there is none. */
+export function avatarImage(url, handle, size) {
+  if (!url) return el('span', { className: 'avatar avatar-initials', style: `--avatar-size:${size}px`, 'aria-hidden': 'true' }, (handle || '?').slice(0, 2).toUpperCase());
+  const image = el('img', { className: 'avatar', crossOrigin: 'anonymous', width: size, height: size, alt: '', loading: 'lazy', decoding: 'async', style: `--avatar-size:${size}px` });
+  image.src = url;
+  return image;
+}
+
+/** An API-relative asset (avatar, image) as an absolute make.fun URL; other origins only over https. */
+export function absoluteAssetUrl(url) {
+  if (typeof url !== 'string' || !url) return null;
+  if (url.startsWith('/')) return MAKEFUN_ORIGIN + url;
+  return /^https:\/\//i.test(url) ? url : null;
+}
+
+export const formatDateTime = (iso) => (iso ? `${new Date(iso).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' })} UTC` : '—');
+export const formatDate = (iso) => (iso ? new Date(iso).toLocaleDateString('en-US', { dateStyle: 'medium', timeZone: 'UTC' }) : '—');
+
+export function formatTimeAgo(iso) {
+  const seconds = Math.max(0, (Date.now() - new Date(iso)) / 1000);
+  if (seconds < 60) return 'just now';
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  return seconds < 86400 ? `${Math.floor(seconds / 3600)}h ago` : `${Math.floor(seconds / 86400)}d ago`;
+}
+
+/** A score as its column means it: *_micro rates as a percentage, else the API's own display string. */
+export function formatScore(value, display, column) {
+  if (value == null && display == null) return '—';
+  if (column?.source?.endsWith('_micro') && Number.isFinite(Number(value))) return `${(Number(value) / 10_000).toFixed(1)}%`;
+  return display ?? String(value);
+}
+
 const BOARD_SORTS = {
   pot: ['Biggest pot', (a, b) => livePotUsd(b) - livePotUsd(a)],
   ending: ['Ending soonest', (a, b) => new Date(a.deadline) - new Date(b.deadline)],
+  odds: ['Fewest entries per place', (a, b) => a.submissionCount / paidPlaces(a) - b.submissionCount / paidPlaces(b)],
   entries: ['Most entries', (a, b) => b.submissionCount - a.submissionCount],
   newest: ['Newest', (a, b) => new Date(b.publishedAt || 0) - new Date(a.publishedAt || 0)],
 };
 const boardFilters = { sort: 'pot', category: 'all', query: '' };
-const bountyCards = new Map();
-
-function createBountyCard(slug) {
-  const span = (className) => el('span', { className });
-  const refs = { category: span('card-category'), sponsor: span('card-sponsor'), summary: el('p', { className: 'card-summary' }), pot: span('card-pot-amount'), potNote: span('card-pot-note'), timeLeft: span('card-time-left'), fee: el('strong'), entries: el('strong') };
-  refs.title = el('a', { className: 'card-title-link', href: bountyHref(slug), onpointerenter: () => prefetchBounty(slug), onfocus: () => prefetchBounty(slug) });
-  refs.feeLabel = el('span', { className: 'card-fee' }, 'Entry fee ', refs.fee);
-  const card = el(
-    'li',
-    { className: 'bounty-card' },
-    el('div', { className: 'card-top' }, refs.category, refs.sponsor),
-    el('h2', { className: 'card-title' }, refs.title),
-    refs.summary,
-    el('div', { className: 'card-money' }, el('div', null, el('span', { className: 'card-label' }, 'Live pot'), refs.pot), el('div', { className: 'card-clock' }, el('span', { className: 'card-label' }, 'Time left'), refs.timeLeft)),
-    el('div', { className: 'card-meta' }, refs.feeLabel, el('span', null, refs.entries, ' entries'), refs.potNote),
-  );
-  return { card, refs };
-}
-
-function fillBountyCard({ refs }, bounty) {
-  const fees = livePotUsd(bounty) - Number(bounty.rewardAmount || 0);
-  setText(refs.category, bounty.category || 'Bounty');
-  setText(refs.sponsor, bounty.sponsor?.name ? `by ${bounty.sponsor.name}` : '');
-  setText(refs.title, bounty.title);
-  setText(refs.summary, bounty.summary || '');
-  setText(refs.pot, formatUsd(livePotUsd(bounty)));
-  setText(refs.potNote, fees > 0.004 ? `+${formatUsd(fees.toFixed(2))} fees in pot` : '');
-  setText(refs.fee, formatEntryFee(bounty));
-  refs.feeLabel.toggleAttribute('data-paid', entryFeeUsd(bounty) > 0);
-  setText(refs.entries, formatCount(bounty.submissionCount));
-  trackCountdown(refs.timeLeft, bounty.deadline);
-}
 
 function matchesSearch(bounty, query) {
   const haystack = [bounty.title, bounty.summary, bounty.category, bounty.sponsor?.name, ...(bounty.skills || [])].join(' ').toLowerCase();
@@ -291,10 +269,21 @@ function buildBoardToolbar(onChange) {
 
 function renderCategoryChips(container, bounties) {
   const counts = new Map();
-  for (const bounty of bounties) counts.set(bounty.category || 'Other', (counts.get(bounty.category || 'Other') || 0) + 1);
+  for (const bounty of bounties) counts.set(bounty.category, (counts.get(bounty.category) || 0) + 1);
   if (!counts.has(boardFilters.category)) boardFilters.category = 'all';
   const chip = (key, count) => el('button', { type: 'button', className: 'chip', dataset: { category: key }, 'aria-pressed': String(boardFilters.category === key) }, key === 'all' ? 'All' : key, el('span', { className: 'chip-count' }, count));
   container.replaceChildren(chip('all', bounties.length), ...[...counts].sort((a, b) => b[1] - a[1]).map(([name, count]) => chip(name, count)));
+}
+
+function mountProfileSearch(header) {
+  const input = el('input', { className: 'input', name: 'handle', 'aria-label': 'Find a profile by handle', placeholder: 'Find @handle', autocomplete: 'off', spellcheck: 'false' });
+  const form = el('form', { className: 'profile-search', role: 'search' }, input, el('button', { type: 'submit', className: 'button' }, 'Go'));
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const handle = input.value.trim().replace(/^@/, '');
+    if (handle) location.hash = profileHref(handle);
+  });
+  header.append(form);
 }
 
 const ROUTES = {
@@ -315,7 +304,7 @@ function parseHashRoute(hash) {
 
 function renderSkeleton(routeName) {
   const bar = (className) => el('div', { className: `skeleton ${className}` });
-  const blocks = routeName === 'board' ? [bar(''), el('div', { className: 'bounty-grid' }, Array.from({ length: 6 }, () => bar('skeleton-card')))] : [bar(''), bar('skeleton-block'), bar('skeleton-block')];
+  const blocks = routeName === 'board' ? [bar(''), el('div', { className: 'grid' }, Array.from({ length: 6 }, () => bar('skeleton-block')))] : [bar(''), bar('skeleton-block'), bar('skeleton-block')];
   return el('div', { className: 'skeleton-view', 'aria-busy': 'true', 'aria-label': 'Loading' }, bar('skeleton-title'), blocks);
 }
 
@@ -336,10 +325,73 @@ function warmLaterViewsWhenIdle() {
   else setTimeout(warm, 2500);
 }
 
-document.querySelector('.profile-search').addEventListener('submit', (event) => {
-  event.preventDefault();
-  const handle = new FormData(event.target).get('handle').trim().replace(/^@/, '');
-  if (handle) location.hash = profileHref(handle);
-});
-addEventListener('hashchange', renderCurrentRoute);
-renderCurrentRoute().then(warmLaterViewsWhenIdle);
+// The palette as variables (index.html's first frame paints the light one in literals), dark mode, the board's
+// controls and everything the later views share.
+const APP_CSS = `
+:root{--bg:#f3f4f7;--surface:#fff;--surface-2:#eceef3;--border:#d8dce4;--text:#11131a;--muted:#555c6a;--accent:#5b3df5;--on-accent:#fff;--accent-soft:#ece8ff;--money:#067a3e;--money-soft:#e2f4e9;--soon:#a35400;--urgent:#c4252c;--gold:#a87b05;--focus:#1f6feb;--radius:12px;--mono:ui-monospace,Consolas,monospace;background:var(--bg);color:var(--text)}
+@media (prefers-color-scheme:dark){:root{--bg:#0d0f14;--surface:#171a21;--surface-2:#21252e;--border:#2d323d;--text:#eef0f4;--muted:#a3aab8;--accent:#9d8cff;--on-accent:#0d0f14;--accent-soft:#272046;--money:#4fd890;--money-soft:#14301f;--soon:#ffb054;--urgent:#ff7070;--gold:#f0c24c;--focus:#6ea8ff;color-scheme:dark}}
+a{color:var(--accent);text-underline-offset:2px}
+:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+h1:focus{outline:none}
+body>header{flex-wrap:wrap}
+.card{background:var(--surface);border-color:var(--border)}
+.card:hover,.card:focus-within{border-color:var(--accent)}
+.title:focus-visible{outline:none}
+.title:focus-visible::after{outline:3px solid var(--focus);border-radius:12px}
+.grid{grid-template-columns:repeat(auto-fill,minmax(min(340px,100%),1fr))}
+small,.totals,.meta{color:var(--muted)}
+.cat{color:var(--accent)}
+.money .pot{color:var(--money)}
+.meta{border-color:var(--border)}
+[data-urgency=soon]{color:var(--soon)}
+[data-urgency=urgent]{color:var(--urgent)}
+.muted{color:var(--muted)}
+.small{font-size:.85rem}
+.visually-hidden{position:absolute!important;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.input,.button,.chip{font:inherit;color:var(--text);background:var(--surface);border:1px solid var(--border)}
+.input{min-height:38px;padding:6px 10px;border-radius:8px;font-size:.95rem}
+.button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:38px;padding:6px 14px;border-radius:8px;font-size:.95rem;font-weight:600;text-decoration:none;cursor:pointer}
+.button:hover{border-color:var(--accent)}
+.button:disabled{opacity:.45;cursor:default}
+.button-primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.profile-search{margin-left:auto;display:flex;gap:6px}
+.profile-search .input{width:11rem;background:#fff2;border-color:#fff4;color:#fff}
+.profile-search .input::placeholder{color:#fffa}
+.profile-search .button{background:#fff;color:#14121f;border-color:#fff}
+.board-toolbar{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+.board-toolbar [type=search]{flex:1 1 240px}
+.category-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:999px;font-size:.88rem;font-weight:600;cursor:pointer}
+.chip[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.chip-count{opacity:.75}
+.board-result-count{margin:0 0 8px;color:var(--muted)}
+.board-result-count:empty{display:none}
+.empty-state{padding:32px 16px;border:1px dashed var(--border);border-radius:var(--radius);background:var(--surface);color:var(--muted);text-align:center}
+.error-state{max-width:560px;margin:40px auto;padding:32px 24px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);text-align:center}
+.error-actions{display:flex;justify-content:center;gap:8px;margin-top:16px}
+.skeleton-view{display:grid;gap:14px}
+.skeleton{min-height:38px;border-radius:var(--radius);background:linear-gradient(90deg,var(--surface-2) 25%,var(--surface) 50%,var(--surface-2) 75%) 0 0/200% 100%;animation:shimmer 1.3s linear infinite}
+.skeleton-title{width:min(420px,70%)}
+.skeleton-block{height:180px}
+@keyframes shimmer{to{background-position:-200% 0}}
+@media (prefers-reduced-motion:reduce){.skeleton{animation:none}}
+.breadcrumb{margin-bottom:10px;color:var(--muted);font-size:.9rem;overflow-wrap:anywhere}
+.view-heading{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:4px 16px;margin-bottom:12px}
+.stat-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:0 0 16px}
+.stat,.panel{min-width:0;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius)}
+.stat{padding:10px 14px}
+.stat-label{color:var(--muted);font-size:.75rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase}
+.stat-value{margin:2px 0 0;font-size:1.6rem;font-weight:800;font-variant-numeric:tabular-nums}
+.stat-pot .stat-value{color:var(--money);font-size:2rem}
+.stat-note{display:block;color:var(--muted);font-size:.8rem;font-weight:500}
+.panel{padding:16px 18px;line-height:1.5}
+.panel h2{font-size:1.1rem;margin:0 0 8px}
+.table-scroll{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+th,td{padding:8px 10px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top}
+th[scope=col]{background:var(--surface-2);color:var(--muted);font-size:.75rem;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap}
+.chip-static{cursor:default;font-weight:500;background:var(--surface-2);border-color:transparent}
+.avatar{--avatar-size:32px;flex:none;width:var(--avatar-size);height:var(--avatar-size);border-radius:50%;object-fit:cover;background:var(--surface-2)}
+.avatar-initials{display:inline-grid;place-items:center;color:var(--accent);background:var(--accent-soft);font-size:calc(var(--avatar-size)*.4);font-weight:700}
+@media (max-width:640px){.stat-row>:last-child:nth-child(odd){grid-column:1/-1}.profile-search{flex:1 1 100%}.profile-search .input{flex:1;width:auto}.stat-row{grid-template-columns:repeat(2,minmax(0,1fr))}.stat-value{font-size:1.3rem}.panel{padding:14px}}
+`;

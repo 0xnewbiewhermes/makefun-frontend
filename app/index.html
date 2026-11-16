@@ -1,104 +1,90 @@
 <!doctype html>
 <html lang="en">
-<head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light dark">
-<meta name="description" content="A fast, read-only make.fun frontend: live bounties, bounty pages, leaderboards and profiles.">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Live bounties · make.fun</title>
-<link rel="preconnect" href="https://make.fun" crossorigin>
 <style>
-:root{--bg:#f5f6f8;--surface:#fff;--surface-2:#eceef3;--text:#12141a;--muted:#555c6b;--border:#d9dde5;--accent:#5b3df5;--on-accent:#fff;--accent-soft:#ece8ff;--money:#087a40;--money-soft:#e2f4e9;--soon:#a35400;--urgent:#c0262d;--gold:#a87b05;--focus:#1f6feb;--radius:12px;--shadow:0 1px 3px rgb(16 24 40/9%);--mono:ui-monospace,Consolas,monospace;color-scheme:light}
-@media (prefers-color-scheme:dark){:root{--bg:#0d0f14;--surface:#171a21;--surface-2:#21252e;--text:#eef0f4;--muted:#a3aab8;--border:#2d323d;--accent:#9483ff;--on-accent:#0d0f14;--accent-soft:#272046;--money:#4fd890;--money-soft:#14301f;--soon:#ffb054;--urgent:#ff6f6f;--gold:#f0c24c;--focus:#6ea8ff;--shadow:none;color-scheme:dark}}
-*,::before,::after{box-sizing:border-box}
-body{margin:0;min-height:100vh;display:flex;flex-direction:column;background:var(--bg);color:var(--text);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-text-size-adjust:100%}
-a{color:var(--accent);text-underline-offset:2px}
-:focus-visible{outline:3px solid var(--focus);outline-offset:2px;border-radius:4px}
-h1,h2,h3{line-height:1.2;margin:0 0 .5rem}
-h1{font-size:clamp(1.6rem,1.2rem + 1.6vw,2.2rem);letter-spacing:-.02em}
-h2{font-size:1.15rem}
-h1:focus,.view:focus{outline:none}
-.visually-hidden{position:absolute!important;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
-.muted{color:var(--muted)}
-.small{font-size:.85rem}
-.site-header{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--surface) 90%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--border)}
-.site-nav,.view{width:100%;max-width:1200px;margin:0 auto;padding:10px 16px}
-.site-nav{display:flex;align-items:center;gap:18px}
-.brand{display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:1.1rem;color:var(--text);text-decoration:none}
-.brand-mark{display:inline-grid;place-items:center;width:28px;height:28px;border-radius:8px;background:var(--accent);color:var(--on-accent)}
-.nav-link{padding:6px 2px;border-bottom:2px solid transparent;color:var(--muted);font-weight:600;text-decoration:none}
-.nav-link[aria-current=page]{color:var(--text);border-bottom-color:var(--accent)}
-.profile-search{margin-left:auto;display:flex;gap:6px}
-.profile-search .input{width:11rem}
-.view{flex:1;padding:22px 16px 48px}
-.site-footer{padding:16px;border-top:1px solid var(--border);color:var(--muted);font-size:.85rem;text-align:center}
-.input,.button,.chip{font:inherit;color:var(--text);background:var(--surface);border:1px solid var(--border)}
-.input{min-height:40px;padding:7px 10px;border-radius:8px;font-size:.95rem}
-.button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:40px;padding:7px 14px;border-radius:8px;font-size:.95rem;font-weight:600;text-decoration:none;cursor:pointer}
-.button:hover{border-color:var(--accent)}
-.button:disabled{opacity:.45;cursor:default}
-.button-primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
-.view-heading{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:4px 16px;margin-bottom:14px}
-.board-totals{margin:0;color:var(--muted);font-size:1.05rem}
-.board-totals strong{color:var(--text);font-variant-numeric:tabular-nums}
-.board-toolbar{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
-.board-toolbar [type=search]{flex:1 1 240px}
-.category-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px}
-.chip{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:999px;font-size:.88rem;font-weight:600;cursor:pointer}
-.chip[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
-.chip-count{opacity:.75;font-variant-numeric:tabular-nums}
-.board-result-count{margin:0 0 8px;color:var(--muted)}
-.board-result-count:empty{display:none}
-.bounty-grid{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px}
-.bounty-card{position:relative;display:flex;flex-direction:column;gap:6px;padding:14px 16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow)}
-.bounty-card:hover,.bounty-card:focus-within{border-color:var(--accent)}
-.card-top,.card-money,.card-meta{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
-.card-category,.tag{padding:2px 8px;border-radius:6px;background:var(--accent-soft);color:var(--accent);font-size:.75rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
-.card-sponsor{color:var(--muted);font-size:.85rem}
-.card-title{margin:0;font-size:1.12rem}
-.card-title-link{color:var(--text);text-decoration:none}
-.card-title-link::after{content:"";position:absolute;inset:0;border-radius:var(--radius)}
-.card-title-link:focus-visible{outline:none}
-.card-title-link:focus-visible::after{outline:3px solid var(--focus);outline-offset:2px}
-.card-summary{margin:0;color:var(--muted);font-size:.9rem;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.card-money{margin-top:auto;padding-top:4px}
-.card-label{display:block;color:var(--muted);font-size:.78rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase}
-.card-pot-amount{font-size:2.3rem;line-height:1.1;font-weight:850;color:var(--money);letter-spacing:-.02em;font-variant-numeric:tabular-nums}
-.card-clock{text-align:right}
-.card-time-left{font-size:1.4rem;font-weight:800;font-variant-numeric:tabular-nums}
-.card-meta{padding-top:8px;border-top:1px solid var(--border);font-size:.98rem;color:var(--muted)}
-.card-meta strong{color:var(--text);font-variant-numeric:tabular-nums}
-.card-fee[data-paid] strong{color:var(--accent)}
-.card-pot-note{color:var(--muted);font-size:.85rem}
-.card-pot-note:empty{display:none}
-[data-urgency=is-soon]{color:var(--soon)}
-[data-urgency=is-urgent]{color:var(--urgent)}
-.empty-state{padding:32px 16px;border:1px dashed var(--border);border-radius:var(--radius);background:var(--surface);color:var(--muted);text-align:center}
-.error-state{max-width:560px;margin:40px auto;padding:32px 24px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);text-align:center}
-.error-actions{display:flex;justify-content:center;gap:8px;margin-top:16px}
-.skeleton-view{display:grid;gap:14px}
-.skeleton{min-height:38px;border-radius:var(--radius);background:linear-gradient(90deg,var(--surface-2) 25%,var(--surface) 50%,var(--surface-2) 75%) 0 0/200% 100%;animation:shimmer 1.3s linear infinite}
-.skeleton-title{width:min(420px,70%)}
-.skeleton-card{height:200px}
-.skeleton-block{height:200px}
-@keyframes shimmer{to{background-position:-200% 0}}
-@media (prefers-reduced-motion:reduce){.skeleton{animation:none}}
-@media (max-width:640px){.site-nav{flex-wrap:wrap;gap:8px 14px}.profile-search{flex:1 1 100%}.profile-search .input{flex:1;width:auto}.bounty-grid{grid-template-columns:1fr}.card-pot-amount{font-size:2rem}.card-time-left{font-size:1.2rem}}
+:root{background:#f3f4f7;color:#11131a;font:16px system-ui,sans-serif}
+body{margin:0}
+body>header{display:flex;align-items:center;gap:16px;padding:12px max(16px,50% - 620px);background:#14121f}
+body>header a{color:#fff;font-weight:700;text-decoration:none}
+main{max-width:1240px;margin:auto;padding:12px 16px}
+h1{margin:4px 0}
+.totals{margin:0 0 12px;font-size:1.1rem;color:#555c6a}
+.grid{list-style:none;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px}
+.card{position:relative;display:grid;gap:6px;padding:12px 16px;background:#fff;border:1px solid #d8dce4;border-radius:12px}
+.money{display:flex;justify-content:space-between;align-items:end}
+small,.cat{font-size:.8rem;font-weight:700;text-transform:uppercase;color:#555c6a}
+.cat{color:#5b3df5}
+h2{margin:0;font-size:1.1rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.title{color:inherit;text-decoration:none}
+.title::after{content:"";position:absolute;inset:0}
+.money b{display:block;font-size:1.35rem}
+.money .pot{font-size:2.3rem;color:#067a3e}
+.meta{margin:0;padding-top:6px;border-top:1px solid #d8dce4;color:#555c6a}
 </style>
-<script type="module" src="app.js"></script>
-</head>
-<body>
-<header class="site-header">
-<nav class="site-nav" aria-label="Main">
-<a class="brand" href="#/"><span class="brand-mark" aria-hidden="true">m</span>make.fun</a>
-<a class="nav-link" href="#/" data-nav="board">Bounties</a>
-<form class="profile-search" role="search">
-<input class="input" name="handle" aria-label="Find a profile by handle" placeholder="Find @handle" autocomplete="off" spellcheck="false">
-<button class="button" type="submit">Go</button>
-</form>
-</nav>
-</header>
-<main class="view" tabindex="-1"></main>
-<footer class="site-footer">Live data from the <a href="https://make.fun/api/openapi.json">make.fun public API</a> · read-only</footer>
-</body>
-</html>
+<header><a href="#/">make.fun · Live bounty board</a></header>
+<main>Loading live bounties…</main>
+<script type="module">/* First frame: readBoardFirstTime, paintBoardFirstFrame, then import(app.js) */
+const boardCards = new Map();
+
+async function readBoardFirstTime() {
+  const response = await fetch('https://make.fun/api/competitions?status=open&activity=times', { cache: 'no-store' });
+  if (!response.ok) throw response.status;
+  return { etag: response.headers.get('etag'), data: await response.json() };
+}
+
+function paintBoardFirstFrame(container, bounties) {
+  container.innerHTML = '<h1 tabindex=-1>Live bounties</h1><p class=totals></p><ul class=grid></ul>';
+  const frame = { totals: container.children[1], list: container.children[2] };
+  writeBoardTotals(frame, bounties);
+  frame.list.append(...bounties.sort((a, b) => livePotUsd(b) - livePotUsd(a)).map(patchBoardCardInPlace));
+  return frame;
+}
+
+function writeBoardTotals(frame, bounties) {
+  const sum = (pick) => bounties.reduce((total, bounty) => total + pick(bounty), 0);
+  setText(frame.totals, `${bounties.length} taking entries · ${formatUsd(Math.round(sum(livePotUsd)))} in live pots · ${sum((b) => b.submissionCount).toLocaleString()} entries`);
+}
+
+function patchBoardCardInPlace(bounty) {
+  let card = boardCards.get(bounty.slug);
+  if (!card) {
+    card = document.createElement('li');
+    card.className = 'card';
+    card.innerHTML = '<b class=cat></b><h2><a class=title></a></h2><div class=money><div><small>Live pot</small><b class=pot></b></div><div><small>Entry fee</small><b class=fee></b></div><div><small>Time left</small><b class=left></b></div></div><p class=meta>';
+    card.querySelector('a').href = '#/bounty/' + bounty.slug;
+    boardCards.set(bounty.slug, card);
+  }
+  const fill = (part, text) => setText(card.querySelector('.' + part), text);
+  fill('cat', bounty.category || 'Bounty');
+  fill('title', bounty.title);
+  fill('pot', formatUsd(livePotUsd(bounty)));
+  fill('fee', bounty.entryFeeUsd > 0 ? formatUsd(bounty.entryFeeUsd) : 'Free');
+  fill('meta', describeEntriesPerPaidPlace(bounty));
+  fill('left', formatTimeLeft((card.querySelector('.left').dataset.deadline = bounty.deadline)));
+  return card;
+}
+
+function describeEntriesPerPaidPlace(bounty) {
+  const entries = bounty.submissionCount;
+  const places = Object.keys(bounty.rewards || {}).length;
+  return `${entries.toLocaleString()} entries for ${places} paid places` + (entries > places ? ` · ${Math.round(entries / places)} per place` : ' · all can place');
+}
+
+function formatTimeLeft(deadline) {
+  const s = (new Date(deadline) - Date.now()) / 1000;
+  const [d, h, m, sec] = [s / 86400, (s % 86400) / 3600, (s % 3600) / 60, s % 60].map(Math.floor);
+  return s < 1 ? 'Closed' : d ? `${d}d ${h}h ${m}m` : `${h}h ${m}m ${sec}s`;
+}
+
+const formatUsd = (value) => '$' + Number(value).toLocaleString('en', { minimumFractionDigits: value % 1 ? 2 : 0 });
+const livePotUsd = (bounty) => +(bounty.potUsd ?? bounty.rewardAmount);
+const isTakingEntries = (bounty) => new Date(bounty.deadline) > Date.now();
+const setText = (node, text) => node.textContent != text && (node.textContent = text);
+
+window.__shotReady = false;
+const firstRead = location.hash.length > 2 ? null : await readBoardFirstTime().catch(() => null);
+const frame = firstRead && paintBoardFirstFrame(document.querySelector('main'), firstRead.data.items.filter(isTakingEntries));
+(await import('./app.js')).startApp({ firstRead, frame, paintBoardFirstFrame, writeBoardTotals, patchBoardCardInPlace, formatTimeLeft, formatUsd, livePotUsd, isTakingEntries, setText });
+</script>

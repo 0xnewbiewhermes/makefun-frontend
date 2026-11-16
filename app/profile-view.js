@@ -1,8 +1,7 @@
 // An account's public profile (#/u/<handle>): avatar, name, bio and links, its record (prize money, entered, placed,
 // won) and its entries, SOLUTIONS_PAGE_SIZE at a time: "Show more" appends the next rows, it never rebuilds the table.
 
-import { adoptViewStyles, apiPaths, bountyHref, el, formatUsd, leaderboardHref, readCached } from './app.js';
-import { absoluteAssetUrl, avatarImage, breadcrumb, formatDate, formatDateTime, formatScore, statBlock } from './view-kit.js';
+import { absoluteAssetUrl, adoptViewStyles, apiPaths, avatarImage, bountyHref, breadcrumb, el, formatDate, formatDateTime, formatScore, formatUsd, leaderboardHref, readCached, statBlock } from './app.js';
 
 const SOLUTIONS_PAGE_SIZE = 25;
 
@@ -70,7 +69,7 @@ function buildSolutionRow(solution) {
     null,
     el('td', null, competition.slug ? el('a', { href: bountyHref(competition.slug) }, competition.title || competition.slug) : '—', el('div', { className: 'muted small' }, [competition.category, competition.status].filter(Boolean).join(' · '))),
     el('td', { className: 'col-title' }, solution.title || ''),
-    el('td', { className: 'col-score' }, score ? formatScore(score.value, score.display, score.column) : '—', score?.column?.title && el('div', { className: 'muted small' }, score.column.title)),
+    el('td', { className: 'col-score' }, score ? formatScore(score.value, score.display, score.column) : '—', score?.column?.title && el('div', { className: 'muted small score-column' }, score.column.title)),
     el('td', null, solution.placement ? `#${solution.placement}` : '—'),
     el('td', { className: solution.prize_usd ? 'prize' : '' }, solution.prize_usd ? formatUsd(solution.prize_usd) : '—'),
     el('td', { className: 'col-received' }, solution.entered_at ? formatDateTime(solution.entered_at) : '', competition.slug && el('div', null, el('a', { className: 'small', href: leaderboardHref(competition.slug) }, 'Leaderboard'))),
@@ -86,5 +85,5 @@ adoptViewStyles(`
 .solutions-table .col-score{font-weight:800;white-space:nowrap}
 .solutions-table .prize{color:var(--money);font-weight:800}
 .show-more{margin-top:12px}
-@media (max-width:640px){.profile-stats{grid-template-columns:repeat(3,minmax(0,1fr))}.profile-header{gap:14px}.profile-header .avatar{--avatar-size:64px!important;width:64px;height:64px}.solutions-table .col-title,.solutions-table .col-received{display:none}}
+@media (max-width:640px){.profile-stats{grid-template-columns:repeat(3,minmax(0,1fr))}.profile-header{gap:14px}.profile-header .avatar{--avatar-size:64px!important;width:64px;height:64px}.solutions-table .col-title,.solutions-table .col-received,.score-column{display:none}.solutions-table td:first-child{min-width:9rem}}
 `);
