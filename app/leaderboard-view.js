@@ -168,6 +168,7 @@ adoptViewStyles(`
 .house-badge{margin-left:6px;padding:1px 6px;border-radius:6px;background:var(--surface-2);color:var(--muted);font-size:.7rem;font-weight:700;text-transform:uppercase}
 .col-score{font-weight:800;font-size:1.2rem;white-space:nowrap;text-align:right}
 .col-interval,.col-received{color:var(--muted);font-size:.92rem;white-space:nowrap}
-.lb-head .col-score{white-space:normal;line-height:1.1;font-size:.75rem}
+.lb-head .col-score{white-space:normal;line-height:1.1}
+.lb-head>*{font-size:.75rem;color:var(--muted)}
 @media (max-width:760px){.lb-row{grid-template-columns:2.2rem minmax(0,1fr) 4.6rem;gap:8px;padding:0 10px}.col-interval,.col-received{display:none}.col-score{font-size:1.05rem}.col-rank{font-size:1.1rem}}
 `);
