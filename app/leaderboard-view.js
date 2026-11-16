@@ -26,6 +26,7 @@ function virtualiseLeaderboardRows(view) {
     fillPooledRow(pooled, rows[index], state.rankColumn);
   }
   for (const pooled of view.rowPool) if (!inView.has(pooled)) pooled.row.hidden = true;
+  setText(view.domCount, `Virtual list · ${inView.size} of ${formatCount(rows.length)} rows in the DOM`);
   view.list.setAttribute('aria-rowcount', String(rows.length + 1));
   view.emptyState.hidden = rows.length > 0;
   setText(view.emptyState, state.query ? 'No entry matches that filter.' : 'No ranked entries yet: scores show here once entries are judged.');
@@ -87,7 +88,7 @@ function fillPooledRow({ row, cells }, entry, rankColumn) {
   const avatarUrl = absoluteAssetUrl(entry.image) || '';
   if (cells.avatarSlot.dataset.src !== avatarUrl || !cells.avatarSlot.firstChild) {
     cells.avatarSlot.dataset.src = avatarUrl;
-    cells.avatarSlot.replaceChildren(avatarImage(avatarUrl, entry.handle, 28));
+    cells.avatarSlot.replaceChildren(avatarImage(avatarUrl, entry.handle, 36));
   }
   cells.house.hidden = !entry.house;
   setText(cells.title, entry.title || '');
@@ -128,6 +129,7 @@ function buildLeaderboardLayout(slug) {
     search: el('input', { type: 'search', className: 'input', placeholder: 'Filter by handle or entry', 'aria-label': 'Filter entries' }),
     spacer: el('div', { className: 'lb-spacer', role: 'rowgroup' }),
     emptyState: el('p', { className: 'empty-state', hidden: true }),
+    domCount: el('span', { className: 'dom-count' }),
   };
   const header = (label, className) => el('span', { role: 'columnheader', className }, label);
   view.list = el('div', { role: 'table', className: 'lb-table', 'aria-label': 'Leaderboard' }, el('div', { role: 'row', className: 'lb-row lb-head', 'aria-rowindex': '1' }, header('#', 'col-rank'), header('Entrant · entry', 'col-entrant'), view.scoreHeader, header('90% interval', 'col-interval'), header('Entered', 'col-received')), view.spacer);
@@ -136,35 +138,36 @@ function buildLeaderboardLayout(slug) {
     null,
     breadcrumb(view.boardTitle, el('span', null, 'Leaderboard')),
     el('div', { className: 'view-heading' }, el('h1', { tabIndex: -1 }, 'Leaderboard'), view.summary),
-    el('div', { className: 'board-toolbar' }, view.search, el('a', { className: 'button', href: bountyHref(slug) }, 'Bounty details')),
+    el('div', { className: 'board-toolbar' }, view.search, view.domCount, el('a', { className: 'button', href: bountyHref(slug) }, 'Bounty details')),
     view.list,
     view.emptyState,
   );
   return view;
 }
 
-const ROW_HEIGHT = 52;
+const ROW_HEIGHT = 60;
 const OVERSCAN_ROWS = 6;
 
 adoptViewStyles(`
-.leaderboard-summary{margin:0;color:var(--muted)}
+.leaderboard-summary{margin:0;color:var(--muted);font-size:1.05rem}
+.dom-count{padding:6px 12px;border-radius:999px;background:var(--money-soft);color:var(--money);font-size:.9rem;font-weight:700;white-space:nowrap}
 .lb-table{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;font-variant-numeric:tabular-nums}
 .lb-row{display:grid;grid-template-columns:3.5rem minmax(0,1fr) 8rem 10rem 6rem;align-items:center;gap:12px;height:${ROW_HEIGHT}px;padding:0 14px;border-bottom:1px solid var(--border);box-sizing:border-box}
 .lb-spacer{position:relative;contain:strict;width:100%}
 .lb-spacer .lb-row{position:absolute;top:0;left:0;right:0}
 .lb-spacer .lb-row:hover{background:var(--surface-2)}
 .lb-head{height:36px;background:var(--surface-2);color:var(--muted);font-size:.75rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
-.col-rank{text-align:right;font-weight:800;font-size:1.05rem}
-.podium .col-rank{color:var(--gold)}
+.col-rank{text-align:right;font-weight:800;font-size:1.3rem}
+.podium .col-rank{color:var(--gold);font-size:1.5rem}
 .col-entrant{display:flex;align-items:center;gap:10px;min-width:0}
 .avatar-slot{display:inline-flex}
 .entrant-text{display:grid;min-width:0}
 .entrant-line,.entrant-title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.entrant-handle{font-weight:700}
-.entrant-title{color:var(--muted);font-size:.85rem}
+.entrant-handle{font-weight:700;font-size:1.08rem}
+.entrant-title{color:var(--muted);font-size:.92rem}
 .house-badge{margin-left:6px;padding:1px 6px;border-radius:6px;background:var(--surface-2);color:var(--muted);font-size:.7rem;font-weight:700;text-transform:uppercase}
-.col-score{font-weight:800;white-space:nowrap;text-align:right}
-.col-interval,.col-received{color:var(--muted);font-size:.88rem;white-space:nowrap}
-.lb-head .col-score{white-space:normal;line-height:1.1}
-@media (max-width:760px){.lb-row{grid-template-columns:2.2rem minmax(0,1fr) 4.6rem;gap:8px;padding:0 10px}.col-interval,.col-received{display:none}}
+.col-score{font-weight:800;font-size:1.2rem;white-space:nowrap;text-align:right}
+.col-interval,.col-received{color:var(--muted);font-size:.92rem;white-space:nowrap}
+.lb-head .col-score{white-space:normal;line-height:1.1;font-size:.75rem}
+@media (max-width:760px){.lb-row{grid-template-columns:2.2rem minmax(0,1fr) 4.6rem;gap:8px;padding:0 10px}.col-interval,.col-received{display:none}.col-score{font-size:1.05rem}.col-rank{font-size:1.1rem}}
 `);
