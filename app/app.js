@@ -17,7 +17,7 @@ function countApiRequestsAndCacheHits(kind) {
   apiTraffic[kind]++;
   if (kind === 'revalidated') apiTraffic.requests++;
   const { requests, cached, revalidated, unchanged } = apiTraffic;
-  setText(apiPill, [`API: ${requests} request${requests === 1 ? '' : 's'}`, `${cached} served from cache`, revalidated && `${revalidated} revalidated`, unchanged && `${unchanged} unchanged, not repainted`].filter(Boolean).join(' · '));
+  setText(apiPill, [`API: ${requests} request${requests === 1 ? '' : 's'}`, `${cached} served from cache`, revalidated && `${revalidated} revalidated` + (unchanged ? ` (${unchanged} unchanged)` : '')].filter(Boolean).join(' · '));
 }
 
 /** Re-read `path` once a minute, just after the minute turns, while the tab is visible (and on return to it). */
@@ -385,7 +385,7 @@ body>header{flex-wrap:wrap}
 .button:hover{border-color:var(--accent)}
 .button:disabled{opacity:.45;cursor:default}
 .button-primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
-.api-pill{padding:4px 12px;border-radius:999px;background:#fff;color:#14121f;font-size:.95rem;font-weight:700;font-variant-numeric:tabular-nums}
+.api-pill{padding:4px 12px;border-radius:999px;background:#fff;color:#14121f;font-size:1rem;font-weight:700;font-variant-numeric:tabular-nums}
 .profile-search{margin-left:auto;display:flex;align-items:center;gap:6px}
 .profile-search .input{width:11rem;background:#fff2;border-color:#fff4;color:#fff}
 .profile-search .input::placeholder{color:#fffa}
