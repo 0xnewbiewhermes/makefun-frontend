@@ -137,15 +137,31 @@ async function renderCurrentRoute() {
   window.__shotReady = true;
 }
 
+/** The four API reads, one per surface. */
+export const apiPaths = {
+  board: () => '/api/competitions?status=open&activity=times',
+  bounty: ({ slug }) => `/api/competitions/${encodeURIComponent(slug)}?submissions=summary`,
+  leaderboard: ({ slug }) => `/api/competitions/${encodeURIComponent(slug)}/leaderboard?rows=first`,
+  profile: ({ handle }) => `/api/profiles/${encodeURIComponent(handle)}`,
+};
+
+/** One view per route, each import()ed on first use. */
+const ROUTES = {
+  board: async () => mountBoardView,
+  bounty: async () => (await import('./bounty-view.js')).mountBountyView,
+  leaderboard: async () => (await import('./leaderboard-view.js')).mountLeaderboardView,
+  profile: async () => (await import('./profile-view.js')).mountProfileView,
+};
+
 /** Handed over by index.html in startApp (live bindings, so every view module reads index.html's own functions). */
 export let formatUsd, formatTimeLeft, livePotUsd, isTakingEntries, setText;
 let firstFrame = {};
 
 export const MAKEFUN_ORIGIN = 'https://make.fun';
-const FRESH_FOR_MS = 20_000;
-const REVALIDATE_EVERY_MS = 60_000;
-const responseCache = new Map();
-const inflightRequests = new Map();
+const FRESH_FOR_MS = 20_000,
+  REVALIDATE_EVERY_MS = 60_000,
+  responseCache = new Map(),
+  inflightRequests = new Map();
 
 class ApiError extends Error {
   constructor(status) {
@@ -161,12 +177,6 @@ function revalidateOnce(path) {
 
 export const peekCached = (path) => responseCache.get(path)?.data;
 
-export const apiPaths = {
-  board: () => '/api/competitions?status=open&activity=times',
-  bounty: ({ slug }) => `/api/competitions/${encodeURIComponent(slug)}?submissions=summary`,
-  leaderboard: ({ slug }) => `/api/competitions/${encodeURIComponent(slug)}/leaderboard?rows=first`,
-  profile: ({ handle }) => `/api/profiles/${encodeURIComponent(handle)}`,
-};
 
 function prefetchBountyOnHover(event) {
   const slug = event.target.closest?.('a[href^="#/bounty/"]')?.hash.split('/')[2];
@@ -194,13 +204,13 @@ export function adoptViewStyles(cssText) {
   document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
 }
 
-export const formatCount = (n) => (Number(n) || 0).toLocaleString('en-US');
-export const entryFeeUsd = (bounty) => Number(bounty.entryFeeUsd || 0);
-export const formatEntryFee = (bounty) => (entryFeeUsd(bounty) > 0 ? formatUsd(bounty.entryFeeUsd) : 'Free');
-export const paidPlaces = (bounty) => bounty.rewardsNow?.length || Object.keys(bounty.rewards || {}).length;
-export const bountyHref = (slug) => `#/bounty/${encodeURIComponent(slug)}`;
-export const leaderboardHref = (slug) => `#/bounty/${encodeURIComponent(slug)}/leaderboard`;
-export const profileHref = (handle) => `#/u/${encodeURIComponent(handle)}`;
+export const formatCount = (n) => (Number(n) || 0).toLocaleString('en-US'),
+  entryFeeUsd = (bounty) => Number(bounty.entryFeeUsd || 0),
+  formatEntryFee = (bounty) => (entryFeeUsd(bounty) > 0 ? formatUsd(bounty.entryFeeUsd) : 'Free'),
+  paidPlaces = (bounty) => bounty.rewardsNow?.length || Object.keys(bounty.rewards || {}).length,
+  bountyHref = (slug) => `#/bounty/${encodeURIComponent(slug)}`,
+  leaderboardHref = (slug) => `#/bounty/${encodeURIComponent(slug)}/leaderboard`,
+  profileHref = (handle) => `#/u/${encodeURIComponent(handle)}`;
 
 /** A stat: a label above a prominent value. */
 export function statBlock(label, value, className = '') {
@@ -228,8 +238,8 @@ export function absoluteAssetUrl(url) {
   return /^https:\/\//i.test(url) ? url : null;
 }
 
-export const formatDateTime = (iso) => (iso ? `${new Date(iso).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' })} UTC` : '—');
-export const formatDate = (iso) => (iso ? new Date(iso).toLocaleDateString('en-US', { dateStyle: 'medium', timeZone: 'UTC' }) : '—');
+export const formatDateTime = (iso) => (iso ? `${new Date(iso).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' })} UTC` : '—'),
+  formatDate = (iso) => (iso ? new Date(iso).toLocaleDateString('en-US', { dateStyle: 'medium', timeZone: 'UTC' }) : '—');
 
 export function formatTimeAgo(iso) {
   const seconds = Math.max(0, (Date.now() - new Date(iso)) / 1000);
@@ -292,14 +302,8 @@ function mountProfileSearch(header) {
   header.append(form);
 }
 
-const ROUTES = {
-  board: async () => mountBoardView,
-  bounty: async () => (await import('./bounty-view.js')).mountBountyView,
-  leaderboard: async () => (await import('./leaderboard-view.js')).mountLeaderboardView,
-  profile: async () => (await import('./profile-view.js')).mountProfileView,
-};
-const viewRoot = document.querySelector('main');
-const activeRoute = { generation: 0, unmount: null };
+const viewRoot = document.querySelector('main'),
+  activeRoute = { generation: 0, unmount: null };
 
 function parseHashRoute(hash) {
   const parts = hash.replace(/^#\/?/, '').split('?')[0].split('/').filter(Boolean).map(decodeURIComponent);
@@ -366,7 +370,7 @@ body>header{flex-wrap:wrap}
 .chip{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:4px 12px;border-radius:999px;font-size:.9rem;font-weight:600;cursor:pointer}
 .chip:hover{border-color:var(--accent)}
 .chip[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
-.chip-count{opacity:.75}
+.chip-count{opacity:.85}
 @media (max-width:640px){.category-chips{order:1;flex:1 1 100%;flex-wrap:nowrap;overflow-x:auto;padding:2px}.chip{flex:none}.board-toolbar [type=search]{flex-basis:150px;min-width:0}.board-toolbar select{max-width:45%}}
 .board-result-count{margin:0 0 8px;color:var(--muted)}
 .board-result-count:empty{display:none}
