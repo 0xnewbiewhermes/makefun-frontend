@@ -5,15 +5,15 @@
 
 import { adoptViewStyles, apiPaths, bountyHref, breadcrumb, el, formatCount, formatDateTime, formatEntryFee, formatTimeLeft, formatUsd, isTakingEntries, leaderboardHref, livePotUsd, MAKEFUN_ORIGIN, paidPlaces, peekCached, readCached, revalidateWhileVisible, setText, statBlock } from './app.js';
 
-export async function mountBountyView(container, { slug }, route) {
+export async function mountBountyView(root, { slug }, route) {
   const view = buildBountyLayout(slug);
   const railReady = matchMedia(MASTER_DETAIL_QUERY).matches && mountBoardListBesideBounty(view, slug, route);
   const fromBoard = peekCached(apiPaths.board())?.items?.find((item) => item.slug === slug);
-  if (fromBoard) patchBountyInPlace(container, view, fromBoard);
-  const onChange = route.whenCurrent((fresh) => patchBountyInPlace(container, view, fresh));
+  if (fromBoard) patchBountyInPlace(root, view, fromBoard);
+  const onChange = route.whenCurrent((fresh) => patchBountyInPlace(root, view, fresh));
   const [bounty] = await Promise.all([readCached(apiPaths.bounty({ slug }), onChange), railReady]);
   if (!route.isCurrent()) return;
-  patchBountyInPlace(container, view, bounty);
+  patchBountyInPlace(root, view, bounty);
   return revalidateWhileVisible(apiPaths.bounty({ slug }), onChange);
 }
 
@@ -52,8 +52,8 @@ function patchBoardRailInPlace(items, currentSlug) {
 }
 
 /** Write the numbers into the existing nodes; rebuild a heavy block (rewards, dates, text) only when its data changed. */
-function patchBountyInPlace(container, view, bounty) {
-  if (!view.page.isConnected) container.replaceChildren(view.page);
+function patchBountyInPlace(root, view, bounty) {
+  if (!view.page.isConnected) root.replaceChildren(view.page);
   document.title = `${bounty.title} · make.fun`;
   const [statusText, tone] = bountyStatusLabel(bounty);
   const fees = livePotUsd(bounty) - Number(bounty.rewardAmount || 0);

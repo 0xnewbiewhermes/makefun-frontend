@@ -3,7 +3,7 @@
 
 import { absoluteAssetUrl, adoptViewStyles, apiPaths, avatarImage, bountyHref, breadcrumb, el, formatDate, formatDateTime, formatScore, formatUsd, leaderboardHref, readCached, statBlock } from './app.js';
 
-export async function mountProfileView(container, { handle }, route) {
+export async function mountProfileView(root, { handle }, route) {
   const profile = await readCached(apiPaths.profile({ handle }));
   if (!route.isCurrent()) return;
   document.title = `@${profile.handle} · make.fun`;
@@ -23,7 +23,7 @@ export async function mountProfileView(container, { handle }, route) {
   const identity = [`@${profile.handle}`, profile.house && 'house account', profile.joined_at && `joined ${formatDate(profile.joined_at)}`].filter(Boolean).join(' · ');
   const links = profileLinks(profile).map(([label, href, text]) => el('li', null, el('span', { className: 'muted' }, `${label} `), el('a', { href, target: '_blank', rel: 'noopener noreferrer' }, text)));
   const headings = ['Bounty', 'Entry', 'Score', 'Place', 'Prize', 'Entered'].map((label, index) => el('th', { scope: 'col', className: ['', 'col-title', '', '', '', 'col-received'][index] }, label));
-  container.replaceChildren(
+  root.replaceChildren(
     el(
       'article',
       null,
@@ -44,10 +44,10 @@ export async function mountProfileView(container, { handle }, route) {
 }
 
 /** Append the next SOLUTIONS_PAGE_SIZE entries to the table; rows already shown are left alone. */
-function appendNextSolutions(tbody, solutions, moreButton) {
+function appendNextSolutions(tbody, solutions, more) {
   const shown = tbody.children.length;
   tbody.append(...solutions.slice(shown, shown + SOLUTIONS_PAGE_SIZE).map(buildSolutionRow));
-  moreButton.hidden = tbody.children.length >= solutions.length;
+  more.hidden = tbody.children.length >= solutions.length;
 }
 
 const SOLUTIONS_PAGE_SIZE = 25;

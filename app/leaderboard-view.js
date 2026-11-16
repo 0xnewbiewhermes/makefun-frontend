@@ -31,7 +31,7 @@ function virtualiseLeaderboardRows(view) {
   setText(view.emptyState, state.query ? 'No entry matches that filter.' : 'No ranked entries yet: scores show here once entries are judged.');
 }
 
-export async function mountLeaderboardView(container, { slug }, route) {
+export async function mountLeaderboardView(root, { slug }, route) {
   const view = buildLeaderboardLayout(slug);
   let frameRequested = false;
   const scheduleVirtualise = () => {
@@ -66,7 +66,7 @@ export async function mountLeaderboardView(container, { slug }, route) {
   const onChange = route.whenCurrent((fresh) => applyLeaderboardData(fresh));
   const board = await readCached(apiPaths.leaderboard({ slug }), onChange);
   if (!route.isCurrent()) return;
-  container.replaceChildren(view.page);
+  root.replaceChildren(view.page);
   applyLeaderboardData(board);
   addEventListener('scroll', scheduleVirtualise, { passive: true });
   addEventListener('resize', scheduleVirtualise);
