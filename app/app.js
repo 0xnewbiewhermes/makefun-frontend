@@ -6,7 +6,10 @@
 /** Cache first, ETag revalidated: a cached answer is served from memory, and when its minute has turned a conditional re-read runs behind it. */
 export function readCachedEtag(path, onChange) {
   const cached = responseCache.get(path);
-  if (!cached) return dedupeInflightRead(path).then((result) => result.data);
+  if (!cached) {
+    if (inflightRequests.has(path)) countTraffic('requests');
+    return dedupeInflightRead(path).then((result) => result.data);
+  }
   countTraffic('cached');
   revalidateIfStale(path, onChange);
   return Promise.resolve(cached.data);
@@ -87,7 +90,7 @@ function start() {
   const refresh = el('button', { type: 'button', title: 'Re-read the live data with If-None-Match', onclick: revalidateEverythingAndRender }, '↻ Refresh');
   const tabs = [['Board', '#/'], ['Bounty', '#/bounty'], ['Leaderboard', '#/leaderboard'], ['Profiles', '#/u']].map(([label, href]) => el('a', { href }, label));
   header.removeAttribute('style');
-  header.replaceChildren(el('b', null, 'make.fun'), el('nav', null, tabs), apiPill, refresh);
+  header.replaceChildren(el('b', null, 'make.fun'), el('nav', null, tabs), mountProfileSearch(), apiPill, refresh);
   document.body.append(el('footer', null, FOOTER_FACTS));
   viewRoot.addEventListener('pointerover', prefetchTopFiveOnHover);
   viewRoot.addEventListener('focusin', prefetchTopFiveOnHover);
@@ -95,6 +98,17 @@ function start() {
   addEventListener('hashchange', renderCurrentRoute);
   setInterval(tickCountdownsInPlace, 1000);
   renderCurrentRoute().then(warmLaterViewsWhenIdle);
+}
+
+/** The header's "Find a profile" box on every view: a handle and Enter opens #/u/<handle> (no request until the profile view reads it). */
+function mountProfileSearch() {
+  const input = el('input', { type: 'search', name: 'handle', className: 'find-profile', placeholder: 'Find a profile: @handle', 'aria-label': 'Find a profile by handle', autocomplete: 'off', spellcheck: 'false' });
+  return el('form', { role: 'search', onsubmit: (event) => {
+    event.preventDefault();
+    const handle = input.value.trim().replace(/^@/, '');
+    if (handle) location.hash = profileHref(handle);
+    input.blur();
+  } }, input);
 }
 
 /** Refresh: keep every cached answer, mark it stale and re-read the open view: each re-read sends If-None-Match, so inside the same minute make.fun answers 304. */
@@ -167,6 +181,7 @@ export const apiPaths = {
   bounty: ({ slug }) => `/api/competitions/${encodeURIComponent(slug)}?submissions=summary`,
   leaderboard: ({ slug }) => `/api/competitions/${encodeURIComponent(slug)}/leaderboard?rows=first`,
   profile: ({ handle }) => `/api/profiles/${encodeURIComponent(handle)}`,
+  submission: ({ id }) => `/api/submissions/${encodeURIComponent(id)}`,
 };
 
 /** One view per route, each import()ed on first use. */
@@ -256,6 +271,8 @@ export function formatTimeLeft(deadline) {
   return s < 1 ? 'Closed' : d ? `${d}d ${h}h ${m}m` : `${h}h ${m}m ${Math.floor(s % 60)}s`;
 }
 
+export const formatWinsDrawsLosses = (record) => (record ? `${record.wins}–${record.draws}–${record.losses}` : '—');
+
 export const formatDateTime = (iso) => (iso ? `${new Date(iso).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' })} UTC` : '—'),
   formatDate = (iso) => (iso ? new Date(iso).toLocaleDateString('en-US', { dateStyle: 'medium', timeZone: 'UTC' }) : '—');
 
@@ -288,7 +305,7 @@ export function prizeNow(bounty, place) {
 /** Both leaderboard row shapes the API sends (whole and light) as one list sorted by rank. */
 export function normalizeLeaderboardRows(board) {
   const rankColumn = board.columns?.find((column) => column.key === board.rank_key) || null;
-  const row = (entry, value, display, image) => ({ rank: entry.rank, prizeRank: entry.prize_rank ?? entry.rank, handle: entry.handle, title: entry.title, image, value, display, interval: entry.interval, receivedAt: entry.received_at, house: entry.house || entry.baseline });
+  const row = (entry, value, display, image) => ({ id: entry.submission_id, rank: entry.rank, prizeRank: entry.prize_rank ?? entry.rank, handle: entry.handle, title: entry.title, image, value, display, interval: entry.interval, receivedAt: entry.received_at, house: entry.house || entry.baseline, record: entry.judge?.matches ? entry.judge : null, rankRange: entry.rank_range || null });
   const rows = [
     ...(board.entries || []).map((entry) => row(entry, entry.values?.[board.rank_key], entry.display?.[board.rank_key], entry.image)),
     ...(board.rest || []).map((entry) => row(entry, entry.value, entry.display, null)),
@@ -356,6 +373,8 @@ const APP_CSS = `
 body>header,footer{display:flex;align-items:center;gap:6px;background:#14121f;color:#cfd3e0}
 body>header{padding:7px max(12px,50% - 620px)}
 body>header b{margin-right:10px;color:#fff;font-size:1.1rem}
+.find-profile{width:190px;margin-left:8px;padding:4px 10px;border-radius:7px;border:1px solid #fff4;background:#fff1;color:#fff;font:inherit;font-size:.85rem}
+.find-profile::placeholder{color:#c9cde0}
 nav a{padding:5px 11px;text-decoration:none;border-radius:7px;color:inherit}
 nav a[aria-current]{background:#fff;color:#14121f;font-weight:700}
 main{display:block;max-width:1240px;margin:auto;padding:12px 12px 44px}
@@ -427,7 +446,7 @@ th[scope=col]{background:var(--surface-2);color:var(--muted);font-size:.72rem;le
 .badge{display:none;margin-left:4px;padding:0 6px;border-radius:5px;background:var(--urgent-soft);color:var(--urgent);font-size:.68rem;font-style:normal;font-weight:800;text-transform:uppercase;vertical-align:1px}
 .tl:has([data-urgency=urgent]) .badge{display:inline-block}
 @media (max-width:900px){body>header{flex-wrap:wrap;row-gap:4px}}
-@media (max-width:640px){body>header{flex-wrap:wrap;row-gap:4px;font-size:14px}body>header b{margin-right:2px}@media (max-width:430px){body>header b{display:none}}nav a{padding:5px 7px}.api-pill{font-size:.7rem;padding:2px 8px}.stat-row{grid-template-columns:repeat(2,minmax(0,1fr))}.stat-value{font-size:1.3rem}.stat-pot .stat-value{font-size:1.5rem}.panel{padding:12px}h1{font-size:1.35rem}}
+@media (max-width:640px){body>header form{order:9;flex:1 1 100%}.find-profile{width:100%;box-sizing:border-box;margin:0}body>header{flex-wrap:wrap;row-gap:4px;font-size:14px}body>header b{margin-right:2px}@media (max-width:430px){body>header b{display:none}}nav a{padding:5px 7px}.api-pill{font-size:.7rem;padding:2px 8px}.stat-row{grid-template-columns:repeat(2,minmax(0,1fr))}.stat-value{font-size:1.3rem}.stat-pot .stat-value{font-size:1.5rem}.panel{padding:12px}h1{font-size:1.35rem}}
 `;
 
 start();

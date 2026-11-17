@@ -6,7 +6,7 @@ import { adoptViewStyles, apiPaths, bountyHref, el, formatCount, formatEntryFee,
 
 /** The board table in `host`; `currentSlug` marks the open bounty. Returns { unmount, patchRowFromBounty }. */
 export async function mountBoardTable(host, options) {
-  const { currentSlug = '', compact = false, route, onData } = options;
+  const { currentSlug = '', compact = false, mini = false, route, onData } = options;
   const rows = new Map();
   let items = [];
   const search = el('input', { type: 'search', className: 'input', placeholder: 'Filter bounties…', 'aria-label': 'Filter bounties', value: filters.query });
@@ -16,8 +16,9 @@ export async function mountBoardTable(host, options) {
   const body = el('tbody');
   const more = el('button', { type: 'button', className: 'button bt-more', hidden: true });
   const empty = el('p', { className: 'empty-state', hidden: true }, 'No bounty matches. Clear the filter or pick another category.');
+  const totals = el('p', { className: 'bt-totals', hidden: !compact });
   const head = ['Bounty', 'Pot', 'Fee', 'Time left', 'Entries', 'Per place'].map((label, index) => el('th', { scope: 'col', className: ['', 'num', 'num', '', 'num', 'num x'][index] }, label));
-  const node = el('section', { className: `btable${compact ? ' compact' : ''}`, 'aria-label': 'Bounty board' }, el('div', { className: 'bt-top' }, tabs, search), sorts, cats, el('div', { className: 'table-scroll' }, el('table', null, el('thead', null, el('tr', null, head)), body)), empty, more);
+  const node = el('section', { className: `btable${compact ? ' compact' : ''}${mini ? ' mini' : ''}`, 'aria-label': 'Bounty board' }, el('div', { className: 'bt-top' }, tabs, search), sorts, cats, el('div', { className: 'table-scroll' }, el('table', null, el('thead', null, el('tr', null, head)), body)), empty, more, totals);
   host.append(node);
 
   function patchRowsInPlace() {
@@ -42,6 +43,8 @@ export async function mountBoardTable(host, options) {
     }
     for (const chip of sorts.children) chip.setAttribute('aria-pressed', String(chip.dataset.sort === filters.sort));
     for (const row of rows.values()) row.node.toggleAttribute('aria-current', row.slug === currentSlug);
+    const live = items.filter(isLive);
+    setText(totals, `${live.length} live · ${formatUsd(Math.round(live.reduce((sum, bounty) => sum + livePot(bounty), 0)))} in live pots · ${formatCount(live.reduce((sum, bounty) => sum + bounty.submissionCount, 0))} entries now`);
   }
 
   function patchRowCells(bounty) {
@@ -172,6 +175,7 @@ adoptViewStyles(`
 tr:has(.title:focus-visible){outline:3px solid var(--focus)}
 .sub{display:none;margin-left:6px;color:var(--muted);font-size:.78rem;white-space:nowrap}
 .bt-more{margin-top:8px}
+.bt-totals{margin:8px 2px 0;color:var(--muted);font-size:.78rem}
 .next-link{color:var(--accent);font-weight:600}
 .live-dot{color:var(--money);font-weight:700;font-size:.85rem}
 .compact .x{display:none}
@@ -180,6 +184,8 @@ tr:has(.title:focus-visible){outline:3px solid var(--focus)}
 .compact .bt-name{min-width:8.5rem}
 .compact .title{font-size:.9rem}
 .compact .pot{font-size:.95rem}
+.mini .bt-chips,.mini .fee,.mini th:nth-child(3),.mini td:nth-child(5),.mini th:nth-child(5){display:none}
+.mini{padding:8px}.mini .bt-top .chip{padding:1px 8px;font-size:.8rem}.mini .bt-name{min-width:0}.mini .title{font-size:.84rem}.mini .pot{font-size:.88rem}.mini .tl{min-width:5.2rem;font-size:.84rem}
 .compact .bt-chips .chip{min-height:26px;font-size:.78rem;padding:1px 9px}
 @media (max-width:760px){.btable .x{display:none}.btable .fee,.btable th:nth-child(3),.btable td:nth-child(5),.btable th:nth-child(5){display:none}.sub{display:inline}.bt-name{min-width:0}.bt-chips{flex-wrap:nowrap;overflow-x:auto}.chip{flex:none}}
 `);

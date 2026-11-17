@@ -13,21 +13,20 @@
     "file": "2-leaderboard.jpg",
     "path": "#/bounty/token-radar-01/leaderboard",
     "viewport": {
-      "width": 840,
-      "height": 525
+      "width": 1280,
+      "height": 800
     },
-    "deviceScaleFactor": 1.5238,
-    "via": "#/ then #/bounty/token-radar-01 then the Leaderboard tab"
+    "deviceScaleFactor": 1,
+    "via": "#/ then the token-radar-01 row then the Leaderboard tab"
   },
   {
-    "file": "3-profile-phone.jpg",
-    "path": "#/u/superskie",
+    "file": "3-profile.jpg",
+    "path": "#/u/icantcodefyi",
     "viewport": {
-      "width": 360,
-      "height": 640
+      "width": 1280,
+      "height": 800
     },
-    "deviceScaleFactor": 2,
-    "mobile": true,
-    "via": "#/"
+    "deviceScaleFactor": 1,
+    "via": "#/ then the header's Find a profile box (icantcodefyi, Enter)"
   }
 ]
