@@ -4,7 +4,7 @@
 // only the rows in view (plus OVERSCAN_ROWS each side) exist: a pool of fixed-height ROW_HEIGHT rows is moved over one
 // spacer and rewritten in place, so scrolling, filtering or a revalidation never rebuilds the list.
 
-import { absoluteAssetUrl, adoptViewStyles, apiPaths, avatarImage, bountyHref, el, formatCount, formatScore, formatTimeAgo, formatTimeLeft, formatUsd, isLive, leaderboardHref, livePot, normalizeLeaderboardRows, peekCached, prizeNow, profileHref, readCached, revalidateWhileVisible, setText, statCard } from './app.js';
+import { absoluteAssetUrl, adoptViewStyles, apiPaths, avatarImage, bountyHref, el, formatCount, formatScore, formatTimeAgo, formatTimeLeft, formatUsd, isLive, leaderboardHref, livePot, normalizeLeaderboardRows, peekCached, prizeNow, profileHref, readCachedEtag, revalidateWhileVisible, setText, statCard } from './app.js';
 
 /** Render only the rows that intersect the viewport (window scroll), reusing pooled row elements. */
 function virtualiseLeaderboardRows(view) {
@@ -40,7 +40,7 @@ export async function mountLeaderboardView(root, { slug }, route) {
   const onBoard = route.whenCurrent((fresh) => applyLeaderboardData(view, slug, fresh));
   const onBounty = route.whenCurrent((fresh) => applyBountyData(view, fresh));
   const bountyPath = apiPaths.bounty({ slug });
-  const [board, bounty] = await Promise.all([readCached(apiPaths.leaderboard({ slug }), onBoard), readCached(bountyPath, onBounty).catch(() => peekCached(apiPaths.board())?.items.find((item) => item.slug === slug))]);
+  const [board, bounty] = await Promise.all([readCachedEtag(apiPaths.leaderboard({ slug }), onBoard), readCachedEtag(bountyPath, onBounty).catch(() => peekCached(apiPaths.board())?.items.find((item) => item.slug === slug))]);
   if (!route.isCurrent()) return;
   root.replaceChildren(view.page);
   view.state.bounty = bounty;

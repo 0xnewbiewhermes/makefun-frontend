@@ -2,9 +2,9 @@
 // route (#/) and the rail beside an open bounty. Rows are keyed by slug, rewritten in place and reordered by moving the
 // same nodes, so filtering, sorting and the minute's revalidation never rebuild the table.
 
-import { adoptViewStyles, apiPaths, bountyHref, el, formatCount, formatEntryFee, formatTimeLeft, formatUsd, isLive, livePot, paidPlaces, patchChildrenInPlace, readCached, revalidateWhileVisible, setText, statCard } from './app.js';
+import { adoptViewStyles, apiPaths, bountyHref, el, formatCount, formatEntryFee, formatTimeLeft, formatUsd, isLive, livePot, paidPlaces, patchChildrenInPlace, readCachedEtag, revalidateWhileVisible, setText, statCard } from './app.js';
 
-/** The board table in `host`; `currentSlug` marks the open bounty. Returns { unmount }. */
+/** The board table in `host`; `currentSlug` marks the open bounty. Returns { unmount, patchRowFromBounty }. */
 export async function mountBoardTable(host, options) {
   const { currentSlug = '', compact = false, route, onData } = options;
   const rows = new Map();
@@ -20,7 +20,7 @@ export async function mountBoardTable(host, options) {
   const node = el('section', { className: `btable${compact ? ' compact' : ''}`, 'aria-label': 'Bounty board' }, el('div', { className: 'bt-top' }, tabs, search), sorts, cats, el('div', { className: 'table-scroll' }, el('table', null, el('thead', null, el('tr', null, head)), body)), empty, more);
   host.append(node);
 
-  function apply() {
+  function patchRowsInPlace() {
     const all = pool();
     const counts = new Map();
     for (const bounty of all) counts.set(bounty.category, (counts.get(bounty.category) || 0) + 1);
@@ -32,7 +32,7 @@ export async function mountBoardTable(host, options) {
     if (filters.tab === 'live') matches.sort(SORTS[filters.sort][1]);
     else if (filters.sort !== 'ending') matches.sort(SORTS[filters.sort][1]);
     const shown = matches.slice(0, filters.limit);
-    patchChildrenInPlace(body, shown.map((bounty) => patchRow(bounty)));
+    patchChildrenInPlace(body, shown.map((bounty) => patchRowCells(bounty)));
     empty.hidden = matches.length > 0;
     more.hidden = matches.length <= shown.length;
     setText(more, `Show more (${matches.length - shown.length} left)`);
@@ -44,7 +44,7 @@ export async function mountBoardTable(host, options) {
     for (const row of rows.values()) row.node.toggleAttribute('aria-current', row.slug === currentSlug);
   }
 
-  function patchRow(bounty) {
+  function patchRowCells(bounty) {
     let row = rows.get(bounty.slug);
     if (!row) {
       row = { slug: bounty.slug, title: el('a', { className: 'title', href: bountyHref(bounty.slug) }), tag: el('span', { className: 'tag' }), sub: el('span', { className: 'sub' }), pot: el('td', { className: 'num pot' }), fee: el('td', { className: 'num fee' }), left: el('span', { className: 't' }), entries: el('td', { className: 'num' }), per: el('td', { className: 'num x muted' }) };
@@ -79,11 +79,11 @@ export async function mountBoardTable(host, options) {
   const take = (data) => {
     items = data.items;
     onData?.(items.filter(isLive));
-    apply();
+    patchRowsInPlace();
   };
   search.addEventListener('input', () => {
     filters.query = search.value.trim().toLowerCase();
-    apply();
+    patchRowsInPlace();
   });
   node.addEventListener('click', async (event) => {
     const button = event.target.closest('button[data-tab],button[data-sort],button[data-category]');
@@ -92,15 +92,22 @@ export async function mountBoardTable(host, options) {
     else if (button.dataset.tab) {
       filters.tab = button.dataset.tab;
       filters.limit = 30;
-      if (filters.tab === 'ended') endedItems = (await readCached(apiPaths.ended()).catch(() => ({ items: [] }))).items;
+      if (filters.tab === 'ended') endedItems = (await readCachedEtag(apiPaths.ended()).catch(() => ({ items: [] }))).items;
     } else if (button.dataset.sort) filters.sort = button.dataset.sort;
     else filters.category = button.dataset.category;
-    apply();
+    patchRowsInPlace();
   });
   const onChange = route.whenCurrent(take);
-  take(await readCached(apiPaths.board(), onChange));
+  take(await readCachedEtag(apiPaths.board(), onChange));
   const stop = revalidateWhileVisible(apiPaths.board(), onChange);
-  return { unmount: () => (stop(), node.remove()), items: () => items };
+  /** The bounty page's own answer is the freshest copy of its row: write it into the cached item and the row, so both show the same numbers. */
+  const patchRowFromBounty = (bounty) => {
+    const item = items.find((candidate) => candidate.slug === bounty.slug);
+    if (!item) return;
+    for (const key of ['potUsd', 'entryFeesUsd', 'entryFeePayers', 'entryFeeUsd', 'submissionCount', 'rewardsNow', 'deadline']) if (bounty[key] !== undefined) item[key] = bounty[key];
+    patchRowsInPlace();
+  };
+  return { unmount: () => (stop(), node.remove()), items: () => items, patchRowFromBounty };
 }
 
 /** The board route (#/): summary cards over the full table. */

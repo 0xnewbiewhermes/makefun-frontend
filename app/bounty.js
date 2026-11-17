@@ -1,25 +1,29 @@
 // One bounty (#/bounty/<slug>): the board table beside it on wide screens (one table, the open bounty highlighted),
 // then title, status, live pot, entry fee, time left, entries, the rewards the live pot pays now, the dates with a
-// "Now" marker, a top-5 preview and the rules. It paints at once from the board's cached copy, fills in from its own
-// read, and patches the same nodes when a revalidation brings a change.
+// "Now" marker, a top-5 preview and the rules. Reached from the board it costs one API request: the board table comes
+// from memory, the top-5 from memory when a hover already read it (else it loads after the view is ready), and the
+// bounty's own answer also patches the highlighted board row, so the row and the pot card show the same numbers.
 
-import { absoluteAssetUrl, adoptViewStyles, apiPaths, avatarImage, bountyHref, el, formatCount, formatDateTime, formatEntryFee, formatScore, formatTimeLeft, formatUsd, isLive, leaderboardHref, livePot, MAKEFUN_ORIGIN, normalizeLeaderboardRows, paidPlaces, peekCached, prizeNow, profileHref, readCached, revalidateWhileVisible, setText, statCard } from './app.js';
+import { absoluteAssetUrl, adoptViewStyles, apiPaths, avatarImage, bountyHref, el, formatCount, formatDateTime, formatEntryFee, formatScore, formatTimeLeft, formatUsd, isLive, leaderboardHref, livePot, MAKEFUN_ORIGIN, normalizeLeaderboardRows, paidPlaces, peekCached, prizeNow, profileHref, readCachedEtag, revalidateWhileVisible, setText, statCard } from './app.js';
 import { mountBoardTable } from './board.js';
 
-export async function mountBountyView(root, { slug }, route) {
+export async function mountBountyOneRequest(root, { slug }, route) {
   const view = buildBountyLayout(slug);
   const rail = matchMedia('(min-width:1000px)').matches ? mountBoardTable(view.rail, { currentSlug: slug, compact: true, route }) : null;
-  const fromBoard = peekCached(apiPaths.board())?.items?.find((item) => item.slug === slug);
+  const fromBoard = peekCached(apiPaths.board(), true)?.items?.find((item) => item.slug === slug);
   if (fromBoard) patchBountyInPlace(root, view, fromBoard);
-  const onChange = route.whenCurrent((fresh) => patchBountyInPlace(root, view, fresh));
-  const bounty = await readCached(apiPaths.bounty({ slug }), onChange).catch(async (error) => {
+  const onChange = route.whenCurrent((fresh) => {
+    patchBountyInPlace(root, view, fresh);
+    rail?.then((handle) => handle.patchRowFromBounty(fresh));
+  });
+  const bounty = await readCachedEtag(apiPaths.bounty({ slug }), onChange).catch(async (error) => {
     (await rail)?.unmount();
     throw error;
   });
   if (!route.isCurrent()) return (await rail)?.unmount();
-  patchBountyInPlace(root, view, bounty);
+  onChange(bounty);
   const onTop = route.whenCurrent((fresh) => patchTopFive(view, fresh));
-  readCached(apiPaths.leaderboard({ slug }), onTop).then(onTop, () => setText(view.topNote, 'Leaderboard unavailable right now.'));
+  readCachedEtag(apiPaths.leaderboard({ slug }), onTop).then(onTop, () => setText(view.topNote, 'Leaderboard unavailable right now.'));
   const stopBounty = revalidateWhileVisible(apiPaths.bounty({ slug }), onChange);
   const stopTop = revalidateWhileVisible(apiPaths.leaderboard({ slug }), onTop);
   const refreshDates = setInterval(() => patchDates(view, view.bounty), 30_000);
@@ -50,7 +54,7 @@ function patchBountyInPlace(root, view, bounty) {
     view.time.value.dataset.opens = bounty.opensAt || bounty.publishedAt || '';
   } else delete view.time.value.dataset.deadline;
   setText(view.time.value, live ? formatTimeLeft(bounty.deadline) : 'Closed');
-  setText(view.time.note, `closes ${formatDateTime(bounty.deadline)}`);
+  setText(view.time.note, `closes ${formatShortUtc(bounty.deadline)}`);
   setText(view.entries.value, formatCount(bounty.submissionCount));
   setText(view.entries.note, bounty.submissionsPassed != null ? `${formatCount(bounty.submissionsPassed)} passed the checks` : `${formatCount(Math.round(bounty.submissionCount / (paidPlaces(bounty) || 1)))} per paid place`);
   setText(view.rewardsTitle, `Rewards · ${paidPlaces(bounty)} paid places`);
@@ -76,7 +80,7 @@ function buildRewardRows(bounty) {
       { className: row.first <= 3 ? `podium-${row.first}` : '' },
       el('th', { scope: 'row' }, row.first === row.last ? ordinal(row.first) : `${ordinal(row.first)}–${ordinal(row.last)}`),
       el('td', { className: 'rw-bar' }, el('i', { style: `width:${Math.max(3, (row.total / max) * 100)}%` })),
-      el('td', { className: 'prize-amount' }, formatUsd(row.total), row.feeShare > 0 && el('small', null, `${formatUsd(row.base)} + ${formatUsd(row.feeShare.toFixed(2))}`)),
+      el('td', { className: 'prize-amount' }, row.feeShare > 0 && el('small', null, `${formatUsd(row.base)} + ${formatUsd(row.feeShare.toFixed(2))}`), formatUsd(row.total)),
     ),
   );
 }
@@ -97,9 +101,9 @@ function buildTimeline(bounty) {
     [bounty.resolvedAt || phases.at(-1)?.endsAt, bounty.resolvedAt ? 'Resolved' : 'Results by'],
   ].filter(([time]) => time);
   const sorted = events.sort((a, b) => new Date(a[0]) - new Date(b[0]));
-  const items = sorted.map(([time, label]) => [new Date(time) <= Date.now() ? 'past' : 'next', label, formatDateTime(time)]);
+  const items = sorted.map(([time, label]) => [new Date(time) <= Date.now() ? 'past' : 'next', label, formatShortUtc(time)]);
   const at = items.findIndex(([state]) => state === 'next');
-  items.splice(at < 0 ? items.length : at, 0, ['now', 'Now', formatDateTime(new Date().toISOString())]);
+  items.splice(at < 0 ? items.length : at, 0, ['now', 'Now', formatShortUtc(new Date())]);
   return el('ol', { className: 'timeline' }, items.map(([state, label, when]) => el('li', { className: state }, el('b', null, label), el('span', null, when))));
 }
 
@@ -112,14 +116,14 @@ function patchTopFive(view, board) {
         'li',
         null,
         el('b', { className: 'top-rank' }, entry.rank),
-        avatarImage(absoluteAssetUrl(entry.image), entry.handle, 30),
+        avatarImage(absoluteAssetUrl(entry.image), entry.handle, 26),
         el('span', { className: 'top-who' }, entry.handle ? el('a', { href: profileHref(entry.handle) }, `@${entry.handle}`) : 'anonymous', el('small', null, entry.title || '')),
         el('b', { className: 'top-score' }, formatScore(entry.value, entry.display, rankColumn)),
         el('b', { className: 'top-prize' }, view.bounty ? formatUsd(prizeNow(view.bounty, entry.prizeRank)) : ''),
       ),
     ),
   );
-  setText(view.topNote, `${formatCount(rows.length)} ranked · ${board.phase?.placements_held ? 'places unofficial until results publish' : 'scores are final'} · prize now = what that place pays at today's pot`);
+  setText(view.topNote, `${formatCount(rows.length)} ranked · ${board.phase?.placements_held ? 'places unofficial until results publish' : 'scores are final'} · prize now = pay at today's pot`);
 }
 
 /** The live payout curve as rows; consecutive places paying the same amount share one row ('4th–10th'). */
@@ -142,6 +146,8 @@ function rebuildIfChanged(view, key, source, build) {
   if (view.builtFrom[key] !== signature) build((view.builtFrom[key] = signature));
 }
 
+/** "Nov 17, 12:30 UTC": the date without its year, for the compact timeline and card notes. */
+const formatShortUtc = (time) => `${new Date(time).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' })} UTC`;
 const ordinal = (n) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] || 'th'}`;
 
 function bountyStatusLabel(bounty) {
@@ -169,13 +175,12 @@ function buildBountyLayout(slug) {
     el(
       'article',
       { className: 'bounty-detail' },
-      el('div', { className: 'bounty-tags' }, view.status, view.category, view.sponsor),
+      el('div', { className: 'bounty-tags' }, view.status, view.category, view.sponsor, el('nav', { className: 'subtabs', 'aria-label': 'Bounty sections' }, el('a', { href: bountyHref(slug), 'aria-current': 'page' }, 'Overview'), view.leaderTab)),
       el('div', { className: 'bounty-title' }, view.heading, view.enter),
       view.summary,
-      el('nav', { className: 'subtabs', 'aria-label': 'Bounty sections' }, el('a', { href: bountyHref(slug), 'aria-current': 'page' }, 'Overview'), view.leaderTab),
       el('dl', { className: 'stat-row' }, view.pot.node, view.fee.node, view.time.node, view.entries.node),
       el('div', { className: 'bounty-split' }, panel(view.rewardsTitle, view.rewardsNote, el('table', { className: 'rewards-table' }, el('caption', { className: 'visually-hidden' }, 'Rewards by place, live pot'), view.rewards)), panel('Dates', view.dates)),
-      panel(el('h2', null, 'Top 5 now ', el('a', { className: 'small', href: leaderboardHref(slug) }, 'full leaderboard →')), view.topNote, view.topList),
+      panel(el('h2', { className: 'top-title' }, 'Top 5 now', el('a', { className: 'small', href: leaderboardHref(slug) }, 'full leaderboard →')), view.topNote, view.topList),
       panel('Description', view.skills, view.description),
       view.rulesPanel,
     ),
@@ -283,34 +288,41 @@ adoptViewStyles(`
 @media (max-width:999px){.bounty-rail{display:none}}
 .bounty-detail{display:grid;gap:10px;min-width:0}
 .bounty-tags{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.bounty-tags .subtabs{margin-left:auto}
+.bounty-detail .stat{padding:6px 12px}
+.bounty-detail .stat-value{font-size:1.35rem}
+.bounty-detail .stat-pot .stat-value{font-size:1.6rem}
+.bounty-detail .panel{padding:8px 14px}
+.bounty-detail .panel h2{margin-bottom:4px}
+.top-title{display:flex;align-items:baseline;gap:12px}
 .bounty-title{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
 .bounty-title .button{flex:none;white-space:nowrap}
-.bounty-summary{max-width:75ch;margin:0;color:var(--muted);font-size:1rem;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.bounty-summary{max-width:75ch;margin:0;color:var(--muted);font-size:.95rem;line-height:1.4;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
 .skill-list{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px;padding:0;list-style:none}
 .bounty-split{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:10px;align-items:start}
 .panel-note{margin:0 0 6px}
-.rewards-table td,.rewards-table th{padding:3px 6px;white-space:nowrap;border-bottom-color:var(--surface-2)}
+.rewards-table td,.rewards-table th{padding:2px 6px;white-space:nowrap;border-bottom-color:var(--surface-2)}
 .rewards-table th{font-weight:700}
 .rw-bar{width:99%}
 .rw-bar i{display:block;height:8px;border-radius:4px;background:var(--money);opacity:.35}
 .prize-amount{text-align:right;color:var(--money);font-weight:800}
-.prize-amount small{display:block;color:var(--muted);font-size:.7rem;font-weight:500;line-height:1.1}
+.prize-amount small{margin-right:8px;color:var(--muted);font-size:.7rem;font-weight:500}
 .podium-1>:first-child{color:var(--gold)}
-.timeline{list-style:none;margin:0;padding:0 0 0 14px;border-left:2px solid var(--border);display:grid;gap:8px;font-size:.88rem}
-.timeline li{position:relative;display:grid}
-.timeline li::before{content:"";position:absolute;left:-21px;top:5px;width:10px;height:10px;border-radius:50%;background:var(--surface);border:2px solid var(--border)}
+.timeline{list-style:none;margin:0;padding:0 0 0 14px;border-left:2px solid var(--border);display:grid;gap:3px;font-size:.88rem}
+.timeline li{position:relative;display:flex;justify-content:space-between;gap:8px}
+.timeline li::before{content:"";position:absolute;left:-21px;top:6px;width:10px;height:10px;border-radius:50%;background:var(--surface);border:2px solid var(--border)}
 .timeline .past::before{background:var(--money);border-color:var(--money)}
 .timeline .now::before{background:var(--accent);border-color:var(--accent);box-shadow:0 0 0 4px var(--accent-soft)}
 .timeline .now{color:var(--accent)}
 .timeline span{color:var(--muted);font-variant-numeric:tabular-nums}
 .timeline .now span{color:var(--accent)}
 .top-list{list-style:none;margin:0;padding:0;display:grid}
-.top-list li{display:grid;grid-template-columns:1.6rem 30px minmax(0,1fr) auto 4.6rem;align-items:center;gap:10px;padding:5px 0;border-top:1px solid var(--surface-2)}
+.top-list li{display:grid;grid-template-columns:1.6rem 26px minmax(0,1fr) auto 4.6rem;align-items:center;gap:10px;padding:4px 0;border-top:1px solid var(--surface-2)}
 .top-rank{font-size:1.1rem;text-align:right}
 .top-list li:first-child .top-rank{color:var(--gold)}
-.top-who{display:grid;min-width:0}
+.top-who{display:flex;align-items:baseline;gap:8px;min-width:0}
 .top-who a{font-weight:700}
-.top-who small{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.top-who small{flex:1;min-width:0;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .top-score{font-size:1.05rem}
 .top-prize{color:var(--money);text-align:right}
 .rules-section{padding:8px 0;border-top:1px solid var(--border)}

@@ -6,7 +6,8 @@
       "width": 1280,
       "height": 800
     },
-    "deviceScaleFactor": 1
+    "deviceScaleFactor": 1,
+    "via": "#/"
   },
   {
     "file": "2-leaderboard.jpg",

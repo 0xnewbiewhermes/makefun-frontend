@@ -1,17 +1,52 @@
-// The shared core, import()ed by index.html's inline router: the response cache (stale-while-revalidate, bound to
+// The shared core, import()ed by index.html (which paints only the header and a loading line): it builds the header
+// tabs and footer, runs the response cache (stale-while-revalidate with ETag / If-None-Match, in-flight dedupe, bound to
 // make.fun's minute), the API pill, the hash router with one lazily imported view per surface, the 1 s countdown
 // ticker and the helpers every view shares (DOM builder, formatters, stat cards, leaderboard rows, base styles).
 
-/** Cache first: a cached answer is served from memory, and when its minute has turned a re-read runs behind it. */
-export function readCached(path, onChange) {
+/** Cache first, ETag revalidated: a cached answer is served from memory, and when its minute has turned a conditional re-read runs behind it. */
+export function readCachedEtag(path, onChange) {
   const cached = responseCache.get(path);
-  if (!cached) return revalidateOnce(path).then((result) => result.data);
+  if (!cached) return dedupeInflightRead(path).then((result) => result.data);
   countTraffic('cached');
   revalidateIfStale(path, onChange);
   return Promise.resolve(cached.data);
 }
 
-/** Re-read `path` once a minute, just after the minute turns, while the tab is visible (and on return to it). */
+/** One in-flight GET per path: a second reader of the same path joins the first request instead of sending another. */
+function dedupeInflightRead(path) {
+  if (!inflightRequests.has(path)) inflightRequests.set(path, fetchIfNoneMatch(path).finally(() => inflightRequests.delete(path)));
+  return inflightRequests.get(path);
+}
+
+/**
+ * GET into the cache, revalidated by ETag: cache: 'no-cache' makes the browser send its stored ETag as If-None-Match, and make.fun
+ * answers 304 while nothing changed (checked on the wire with the DevTools protocol). The browser hands the page its cached copy
+ * as a 200 with the same ETag, so "unchanged" is counted when the ETag we held comes back. A header set by hand would fail CORS:
+ * make.fun's 304 carries no Access-Control-Allow-Origin. Counted in the API pill.
+ */
+async function fetchIfNoneMatch(path) {
+  const cached = responseCache.get(path);
+  countTraffic('requests');
+  const response = await fetch(MAKEFUN_ORIGIN + path, { cache: 'no-cache', signal: AbortSignal.timeout(30_000) }).catch(() => {
+    throw new ApiError(0);
+  });
+  if (!response.ok) throw new ApiError(response.status);
+  const etag = response.headers.get('ETag');
+  const data = await response.json();
+  if (cached && etag && etag === cached.etag) {
+    Object.assign(cached, { fetchedAt: Date.now(), stale: false });
+    countTraffic('unchanged');
+    return { data: cached.data, changed: false };
+  }
+  const signature = JSON.stringify(data);
+  if (cached?.signature === signature) {
+    Object.assign(cached, { fetchedAt: Date.now(), stale: false, etag });
+    return { data: cached.data, changed: false };
+  }
+  responseCache.set(path, { data, signature, etag, fetchedAt: Date.now(), stale: false });
+  return { data, changed: true };
+}
+
 export function revalidateWhileVisible(path, onChange) {
   const revalidate = revalidateIfStale.bind(null, path, onChange);
   const timer = setInterval(revalidate, 15_000);
@@ -45,30 +80,38 @@ function tickCountdownsInPlace() {
   }
 }
 
-export function start() {
+/** Build the page chrome index.html left out (header tabs, API pill, Refresh, footer strip) and show the first route. */
+function start() {
   adoptViewStyles(APP_CSS);
-  document.querySelector('header output').replaceWith(apiPill);
-  document.querySelector('header button').onclick = () => {
-    responseCache.clear();
-    renderCurrentRoute();
-  };
-  viewRoot.addEventListener('pointerover', prefetchBountyOnHover);
+  const header = document.querySelector('header');
+  const refresh = el('button', { type: 'button', title: 'Re-read the live data with If-None-Match', onclick: revalidateEverythingAndRender }, '↻ Refresh');
+  const tabs = [['Board', '#/'], ['Bounty', '#/bounty'], ['Leaderboard', '#/leaderboard'], ['Profiles', '#/u']].map(([label, href]) => el('a', { href }, label));
+  header.removeAttribute('style');
+  header.replaceChildren(el('b', null, 'make.fun'), el('nav', null, tabs), apiPill, refresh);
+  document.body.append(el('footer', null, FOOTER_FACTS));
+  viewRoot.addEventListener('pointerover', prefetchTopFiveOnHover);
+  viewRoot.addEventListener('focusin', prefetchTopFiveOnHover);
+  viewRoot.addEventListener('pointerout', prefetchTopFiveOnHover);
   addEventListener('hashchange', renderCurrentRoute);
   setInterval(tickCountdownsInPlace, 1000);
   renderCurrentRoute().then(warmLaterViewsWhenIdle);
 }
 
-/** The header's API pill, per view: network requests, answers served from memory, re-reads and how many found nothing new. */
+/** Refresh: keep every cached answer, mark it stale and re-read the open view: each re-read sends If-None-Match, so inside the same minute make.fun answers 304. */
+function revalidateEverythingAndRender() {
+  for (const entry of responseCache.values()) entry.stale = true;
+  renderCurrentRoute();
+}
+
+/** The header's API pill, per view: network requests, how many came back with the ETag we held (the wire answer is 304), answers served from memory. */
 function countTraffic(kind) {
   apiTraffic[kind]++;
-  if (kind === 'revalidated') apiTraffic.requests++;
   paintPill();
 }
 
 function paintPill() {
-  const { requests, cached, revalidated, unchanged } = apiTraffic;
-  const parts = [`${requests} API request${requests === 1 ? '' : 's'}`, `${cached} from memory`, revalidated && `${revalidated} revalidated (${unchanged} unchanged)`];
-  setText(apiPill, 'this view: ' + parts.filter(Boolean).join(' · '));
+  const { requests, cached, unchanged } = apiTraffic;
+  setText(apiPill, `this view: ${requests} API request${requests === 1 ? '' : 's'} · ${unchanged} unchanged (ETag) · ${cached} from memory`);
 }
 
 async function renderCurrentRoute() {
@@ -76,7 +119,7 @@ async function renderCurrentRoute() {
   window.__shotReady = false;
   activeRoute.unmount?.();
   activeRoute.unmount = null;
-  Object.assign(apiTraffic, { requests: 0, cached: 0, revalidated: 0, unchanged: 0 });
+  Object.assign(apiTraffic, { requests: 0, cached: 0, unchanged: 0 });
   paintPill();
   const route = { isCurrent: () => generation === activeRoute.generation, whenCurrent: (fn) => (...args) => route.isCurrent() && fn(...args) };
   try {
@@ -129,7 +172,7 @@ export const apiPaths = {
 /** One view per route, each import()ed on first use. */
 const ROUTES = {
   board: async () => (await import('./board.js')).mountBoardView,
-  bounty: async () => (await import('./bounty.js')).mountBountyView,
+  bounty: async () => (await import('./bounty.js')).mountBountyOneRequest,
   leaderboard: async () => (await import('./leaderboard.js')).mountLeaderboardView,
   profile: async () => (await import('./profile.js')).mountProfileView,
   profiles: async () => (await import('./profile.js')).mountProfilesView,
@@ -138,9 +181,11 @@ const ROUTES = {
 export const MAKEFUN_ORIGIN = 'https://make.fun';
 const responseCache = new Map(),
   inflightRequests = new Map(),
-  apiTraffic = { requests: 0, cached: 0, revalidated: 0, unchanged: 0 },
-  apiPill = el('output', { className: 'api-pill', title: 'Counted live by fetchIntoCache and readCached in app.js' });
-let lastSlug = '';
+  apiTraffic = { requests: 0, cached: 0, unchanged: 0 },
+  apiPill = el('output', { className: 'api-pill', title: 'JSON reads counted live by fetchIfNoneMatch and readCachedEtag in app.js (avatar images load separately)' });
+const FOOTER_FACTS = '1-file first load · ETag-revalidated reads · in-flight dedupe · rows patched in place · virtual leaderboard · 1 request a view';
+let lastSlug = '',
+  hoverTimer = 0;
 
 class ApiError extends Error {
   constructor(status) {
@@ -149,49 +194,27 @@ class ApiError extends Error {
   }
 }
 
-/** Re-read when the tab is visible and the cached answer's minute has turned; onChange only when the answer changed. */
+/** Re-read when the tab is visible and the cached answer's minute has turned (or Refresh marked it stale); onChange only when the answer changed. */
 function revalidateIfStale(path, onChange) {
+  const entry = responseCache.get(path);
   const minute = (time) => Math.floor(time / 60_000);
-  if (document.hidden || minute(responseCache.get(path)?.fetchedAt) === minute(Date.now())) return;
-  revalidateOnce(path).then((r) => r.changed && onChange?.(r.data), () => {});
+  if (document.hidden || (!entry?.stale && minute(entry?.fetchedAt) === minute(Date.now()))) return;
+  dedupeInflightRead(path).then((r) => r.changed && onChange?.(r.data), () => {});
 }
 
-/** GET into the cache, counted in the API pill. No If-None-Match: make.fun's 304 carries no CORS header, so a browser could
- * not read it (and the header costs a preflight). An answer that matches the cached one reports changed: false. */
-async function fetchIntoCache(path) {
-  const cached = responseCache.get(path);
-  countTraffic(cached ? 'revalidated' : 'requests');
-  const response = await fetch(MAKEFUN_ORIGIN + path, { cache: 'no-store', signal: AbortSignal.timeout(30_000) }).catch(() => {
-    throw new ApiError(0);
-  });
-  if (!response.ok) throw new ApiError(response.status);
-  const data = await response.json();
-  const signature = JSON.stringify(data);
-  if (cached?.signature === signature) {
-    cached.fetchedAt = Date.now();
-    countTraffic('unchanged');
-    return { data: cached.data, changed: false };
-  }
-  responseCache.set(path, { data, signature, fetchedAt: Date.now() });
-  return { data, changed: true };
-}
-
-function revalidateOnce(path) {
-  if (!inflightRequests.has(path)) inflightRequests.set(path, fetchIntoCache(path).finally(() => inflightRequests.delete(path)));
-  return inflightRequests.get(path);
-}
-
-/** The cached answer if there is one (no request): counted as served from memory when it is. */
-export function peekCached(path) {
+/** The cached answer if there is one (no request); counted as served from memory unless quiet. */
+export function peekCached(path, quiet) {
   const data = responseCache.get(path)?.data;
-  if (data) countTraffic('cached');
+  if (data && !quiet) countTraffic('cached');
   return data;
 }
 
-function prefetchBountyOnHover(event) {
-  const slug = event.target.closest?.('a[href^="#/bounty/"]')?.hash.split('/')[2];
-  const path = slug && apiPaths.bounty({ slug: decodeURIComponent(slug) });
-  if (path && !responseCache.has(path)) revalidateOnce(path).catch(() => {});
+/** Resting the pointer on (or focusing) a bounty link for 150 ms reads its light top-5 (rows=first) ahead of the click; the 131 KB bounty answer waits for the click. */
+function prefetchTopFiveOnHover(event) {
+  clearTimeout(hoverTimer);
+  const slug = event.type !== 'pointerout' && event.target.closest?.('a[href^="#/bounty/"]')?.hash.split('/')[2];
+  const path = slug && apiPaths.leaderboard({ slug: decodeURIComponent(slug) });
+  if (path && !responseCache.has(path)) hoverTimer = setTimeout(() => dedupeInflightRead(path).catch(() => {}), 150);
 }
 
 export function el(tag, props, ...children) {
@@ -327,8 +350,16 @@ function warmLaterViewsWhenIdle() {
   else setTimeout(warm, 2500);
 }
 
-// The base styles every view shares; index.html carries only the header, footer and page frame.
+// The base styles every view shares, the page frame, the header and the footer: index.html carries none of them.
 const APP_CSS = `
+:root{--bg:#eef0f5;--surface:#fff;--border:#d3d8e2;--text:#12141b;--muted:#4b5262;--accent:#5030e0;--money:#066a37;color-scheme:light dark;background:var(--bg);color:var(--text);font:15px/1.4 system-ui,sans-serif}
+body>header,footer{display:flex;align-items:center;gap:6px;background:#14121f;color:#cfd3e0}
+body>header{padding:7px max(12px,50% - 620px)}
+body>header b{margin-right:10px;color:#fff;font-size:1.1rem}
+nav a{padding:5px 11px;text-decoration:none;border-radius:7px;color:inherit}
+nav a[aria-current]{background:#fff;color:#14121f;font-weight:700}
+main{display:block;max-width:1240px;margin:auto;padding:12px 12px 44px}
+footer{position:fixed;inset:auto 0 0;padding:4px 12px;font-size:12px;justify-content:center;text-align:center}
 :root{--surface-2:#e8ebf2;--on-accent:#fff;--accent-soft:#e9e5ff;--money-soft:#dcf2e5;--soon:#9a4d00;--urgent:#bf1f27;--urgent-soft:#fde4e5;--gold:#9a6f00;--focus:#1f6feb;--radius:10px;--mono:ui-monospace,Consolas,monospace}
 @media (prefers-color-scheme:dark){:root{--bg:#0d0f14;--surface:#171a21;--border:#323845;--text:#eef0f4;--muted:#adb4c2;--accent:#a395ff;--money:#4fd890;--surface-2:#232733;--on-accent:#0d0f14;--accent-soft:#2a2350;--money-soft:#14301f;--soon:#ffb054;--urgent:#ff8a8a;--urgent-soft:#3a1c1f;--gold:#f0c24c;--focus:#6ea8ff}}
 [hidden]{display:none!important}
@@ -353,7 +384,7 @@ body>header button{margin-left:6px;font:inherit;font-size:.85rem;color:#fff;back
 .chip[aria-pressed=true],.chip[aria-selected=true]{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
 .chip-count{opacity:.8}
 .chip-static{cursor:default;font-weight:500;background:var(--surface-2);border-color:transparent;min-height:0;padding:1px 9px}
-.api-pill{padding:3px 11px;border-radius:999px;background:#fff;color:#14121f;font-size:.82rem;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+.api-pill{margin-left:auto;padding:3px 11px;border-radius:999px;background:#fff;color:#14121f;font-size:.82rem;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
 .empty-state{padding:28px 16px;border:1px dashed var(--border);border-radius:var(--radius);background:var(--surface);color:var(--muted);text-align:center}
 .error-state{max-width:560px;margin:40px auto;padding:32px 24px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);text-align:center}
 .error-actions{display:flex;justify-content:center;gap:8px;margin-top:16px}
@@ -395,5 +426,8 @@ th[scope=col]{background:var(--surface-2);color:var(--muted);font-size:.72rem;le
 .tl:has([data-urgency=urgent]) .bar::after{background:var(--urgent)}
 .badge{display:none;margin-left:4px;padding:0 6px;border-radius:5px;background:var(--urgent-soft);color:var(--urgent);font-size:.68rem;font-style:normal;font-weight:800;text-transform:uppercase;vertical-align:1px}
 .tl:has([data-urgency=urgent]) .badge{display:inline-block}
+@media (max-width:900px){body>header{flex-wrap:wrap;row-gap:4px}}
 @media (max-width:640px){body>header{flex-wrap:wrap;row-gap:4px;font-size:14px}body>header b{margin-right:2px}@media (max-width:430px){body>header b{display:none}}nav a{padding:5px 7px}.api-pill{font-size:.7rem;padding:2px 8px}.stat-row{grid-template-columns:repeat(2,minmax(0,1fr))}.stat-value{font-size:1.3rem}.stat-pot .stat-value{font-size:1.5rem}.panel{padding:12px}h1{font-size:1.35rem}}
 `;
+
+start();

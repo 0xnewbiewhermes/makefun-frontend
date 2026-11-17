@@ -2,10 +2,10 @@
 // ranked in, best place) over its entries, SOLUTIONS_PAGE_SIZE at a time ("Show more" appends, it never rebuilds the
 // table); and #/u, the profile finder: a handle box and the entrants leading the biggest live leaderboard.
 
-import { absoluteAssetUrl, adoptViewStyles, apiPaths, avatarImage, bountyHref, el, formatDate, formatDateTime, formatScore, formatUsd, isLive, leaderboardHref, normalizeLeaderboardRows, profileHref, readCached, statCard } from './app.js';
+import { absoluteAssetUrl, adoptViewStyles, apiPaths, avatarImage, bountyHref, el, formatDate, formatDateTime, formatScore, formatUsd, isLive, leaderboardHref, normalizeLeaderboardRows, profileHref, readCachedEtag, setText, statCard } from './app.js';
 
 export async function mountProfileView(root, { handle }, route) {
-  const profile = await readCached(apiPaths.profile({ handle }));
+  const profile = await readCachedEtag(apiPaths.profile({ handle }));
   if (!route.isCurrent()) return;
   document.title = `@${profile.handle} · make.fun`;
   const record = profile.record || {};
@@ -15,11 +15,14 @@ export async function mountProfileView(root, { handle }, route) {
   const moreButton = el('button', { type: 'button', className: 'button show-more', onclick: () => appendNextPageOfEntries(solutionsBody, solutions, moreButton) }, 'Show more entries');
 
   const cards = [statCard('Prize money', 'stat-pot'), statCard('Bounties won'), statCard('Ranked in'), statCard('Best place')];
-  const fill = (card, value, note) => ((card.value.textContent = value), (card.note.textContent = note));
-  fill(cards[0], formatUsd(record.prize_usd || 0), `${record.podium_finishes ?? 0} podium finishes`);
-  fill(cards[1], record.competitions_won ?? 0, `of ${record.competitions_entered ?? 0} entered`);
-  fill(cards[2], record.competitions_placed ?? 0, 'bounties placed');
-  fill(cards[3], record.best_placement ? `#${record.best_placement}` : '—', 'best final place');
+  const patchCardInPlace = (card, v, n) => {
+    setText(card.value, String(v));
+    setText(card.note, n);
+  };
+  patchCardInPlace(cards[0], formatUsd(record.prize_usd || 0), `${record.podium_finishes ?? 0} podium finishes`);
+  patchCardInPlace(cards[1], record.competitions_won ?? 0, `of ${record.competitions_entered ?? 0} entered`);
+  patchCardInPlace(cards[2], record.competitions_placed ?? 0, 'bounties placed');
+  patchCardInPlace(cards[3], record.best_placement ? `#${record.best_placement}` : '—', 'best final place');
   const identity = [`@${profile.handle}`, profile.house && 'house account', profile.joined_at && `joined ${formatDate(profile.joined_at)}`].filter(Boolean).join(' · ');
   const links = profileLinks(profile).map(([label, href, text]) => el('li', null, el('span', { className: 'muted' }, `${label} `), el('a', { href, target: '_blank', rel: 'noopener noreferrer' }, text)));
   const headings = ['Bounty', 'Entry', 'Score', 'Place', 'Prize', 'Entered'].map((label, index) => el('th', { scope: 'col', className: ['', 'col-title', 'col-sc', '', 'col-prize', 'col-received'][index] }, label));
@@ -55,10 +58,10 @@ export async function mountProfilesView(root, _params, route) {
   const list = el('ul', { className: 'finder-list' });
   const heading = el('h2', null, 'Leading entrants');
   root.replaceChildren(el('section', null, el('h1', { tabIndex: -1 }, 'Profiles'), el('p', { className: 'muted' }, 'Open any account by handle: prize money, bounties won, places and every entry.'), form, el('section', { className: 'panel' }, heading, list)));
-  const board = await readCached(apiPaths.board());
+  const board = await readCachedEtag(apiPaths.board());
   const target = board.items.filter(isLive).sort((a, b) => b.submissionCount - a.submissionCount)[0];
   if (!target || !route.isCurrent()) return;
-  const { rows } = normalizeLeaderboardRows(await readCached(apiPaths.leaderboard({ slug: target.slug })));
+  const { rows } = normalizeLeaderboardRows(await readCachedEtag(apiPaths.leaderboard({ slug: target.slug })));
   if (!route.isCurrent()) return;
   heading.textContent = `Leading ${target.title}`;
   list.replaceChildren(...rows.filter((row) => row.handle && !row.house).slice(0, 12).map((row) => el('li', null, avatarImage(absoluteAssetUrl(row.image), row.handle, 36), el('span', { className: 'who' }, el('a', { href: profileHref(row.handle) }, `@${row.handle}`), el('small', { className: 'muted' }, `#${row.rank} · ${row.title || ''}`)))));
