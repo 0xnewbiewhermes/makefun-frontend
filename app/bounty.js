@@ -185,7 +185,7 @@ function buildBountyLayout(slug) {
       el('dl', { className: 'stat-row' }, view.pot.node, view.fee.node, view.time.node, view.entries.node),
       el('div', { className: 'bounty-split' }, panel(view.rewardsTitle, el('table', { className: 'rewards-table' }, el('caption', { className: 'visually-hidden' }, 'Rewards by place, live pot'), el('thead', null, el('tr', null, ['Place', 'Base', 'Fee share', 'Pays now'].map((label) => el('th', { scope: 'col' }, label)))), view.rewards)), panel('Dates', view.dates)),
       panel(el('h2', { className: 'top-title' }, 'Top 5 now', view.topNote, el('a', { className: 'small', href: leaderboardHref(slug) }, 'full leaderboard →')), view.topList),
-      panel('Description', view.skills, view.description),
+      el('section', { className: 'panel description-panel' }, el('h2', null, 'Description'), view.skills, view.description),
       view.rulesPanel,
     ),
   );
@@ -298,6 +298,7 @@ adoptViewStyles(`
 .bounty-detail .stat-pot .stat-value{font-size:1.6rem}
 .bounty-detail .panel{padding:8px 14px}
 .bounty-detail .panel h2{margin-bottom:4px}
+.description-panel{margin-top:14px}
 .top-title{display:flex;align-items:baseline;gap:10px}
 .top-note{flex:1;font-weight:500;font-size:.78rem}
 .bounty-title{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
@@ -326,7 +327,7 @@ adoptViewStyles(`
 .timeline span{color:var(--muted);font-variant-numeric:tabular-nums}
 
 .top-list{list-style:none;margin:0;padding:0;display:grid}
-.top-list li{display:grid;grid-template-columns:1.6rem 26px minmax(0,1fr) auto auto 3.6rem 4.6rem;align-items:center;gap:10px;padding:4px 0;border-top:1px solid var(--surface-2)}
+.top-list li{display:grid;grid-template-columns:1.6rem 26px minmax(0,1fr) auto auto 3.6rem 4.6rem;align-items:center;gap:10px;padding:6px 0;border-top:1px solid var(--surface-2)}
 .top-rank{font-size:1.1rem;text-align:right}
 .top-list li:first-child .top-rank{color:var(--gold)}
 .top-who{display:flex;align-items:baseline;gap:8px;min-width:0}
