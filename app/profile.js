@@ -26,7 +26,7 @@ export async function mountProfileView(root, { handle }, route) {
   patchCardInPlace(cards[3], formatCount(paid.length), 'entries paid a prize');
   patchCardInPlace(cards[4], formatCount(record.competitions_won ?? 0), `${record.podium_finishes ?? 0} top-3 finishes`);
   patchCardInPlace(cards[5], record.best_placement ? `#${formatCount(record.best_placement)}` : '—', 'best final place');
-  const identity = [`@${profile.handle}`, profile.house && 'house account', profile.joined_at && `joined ${formatDate(profile.joined_at)}`].filter(Boolean).join(' · ');
+  const identity = [profile.display_name && `@${profile.handle}`, profile.house && 'house account', profile.joined_at && `joined ${formatDate(profile.joined_at)}`].filter(Boolean).join(' · ');
   const links = profileLinks(profile).map(([label, href, text]) => el('li', null, el('span', { className: 'muted' }, `${label} `), el('a', { href, target: '_blank', rel: 'noopener noreferrer' }, text)));
   const grid = el('div', { className: 'bounty-cards' });
   const more = el('button', { type: 'button', className: 'button show-more' });
@@ -56,7 +56,7 @@ export async function mountProfileView(root, { handle }, route) {
         'header',
         { className: 'profile-header' },
         avatarImage(absoluteAssetUrl(profile.avatar?.url || profile.image), profile.handle, 72),
-        el('div', { className: 'profile-identity' }, el('h1', { tabIndex: -1 }, profile.display_name || `@${profile.handle}`), el('p', { className: 'muted' }, identity), profile.bio && el('p', { className: 'profile-bio' }, profile.bio), links.length > 0 && el('ul', { className: 'profile-links' }, links)),
+        el('div', { className: 'profile-identity' }, el('h1', { tabIndex: -1 }, profile.display_name || `@${profile.handle}`), identity && el('p', { className: 'muted' }, identity), profile.bio && el('p', { className: 'profile-bio' }, profile.bio), links.length > 0 && el('ul', { className: 'profile-links' }, links)),
         payouts[0] && buildLastPayout(payouts[0]),
       ),
       el('dl', { className: 'stat-row profile-stats' }, cards.map((card) => card.node)),

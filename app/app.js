@@ -87,7 +87,7 @@ function tickCountdownsInPlace() {
 function start() {
   adoptViewStyles(APP_CSS);
   const header = document.querySelector('header');
-  const refresh = el('button', { type: 'button', title: 'Re-read the live data with If-None-Match', onclick: revalidateEverythingAndRender }, '↻ Refresh');
+  const refresh = el('button', { type: 'button', title: 'Re-read the live data with If-None-Match', 'aria-label': 'Refresh', onclick: revalidateEverythingAndRender }, '↻', el('span', { className: 'refresh-label' }, ' Refresh'));
   const tabs = [['Board', '#/'], ['Bounty', '#/bounty'], ['Leaderboard', '#/leaderboard'], ['Profiles', '#/u']].map(([label, href]) => el('a', { href }, label));
   header.removeAttribute('style');
   header.replaceChildren(el('b', null, 'make.fun'), el('nav', null, tabs), mountProfileSearch(), apiPill, refresh);
@@ -283,11 +283,16 @@ export function formatTimeAgo(iso) {
   return seconds < 86400 ? `${Math.floor(seconds / 3600)}h ago` : `${Math.floor(seconds / 86400)}d ago`;
 }
 
-/** A score as its column means it: *_micro rates as a percentage, else the API's own display string. */
+/** A score as its column means it: *_micro rates and "millionths" as a percentage, µs as ms, micro-USDC as dollars, lamports as SOL, else the API's display with separators. */
 export function formatScore(value, display, column) {
   if (value == null && display == null) return '—';
-  if (column?.source?.endsWith('_micro') && Number.isFinite(Number(value))) return `${(Number(value) / 10_000).toFixed(1)}%`;
-  return display ?? String(value);
+  const number = Number(value ?? display), unit = `${column?.source || ''} ${column?.title || ''}`;
+  if (!Number.isFinite(number)) return display ?? String(value);
+  if (/_micro |millionths/.test(unit)) return `${(number / 10_000).toFixed(1)}%`;
+  if (/micro-USDC/.test(unit)) return `${number < 0 ? '−' : ''}$${(Math.abs(number) / 1e6).toFixed(2)}`;
+  if (/lamports/.test(unit)) return `${(number / 1e9).toFixed(2)} SOL`;
+  if (/µs/.test(unit)) return `${formatCount(Math.round(number / 1000))} ms`;
+  return Number.isInteger(number) ? formatCount(number) : display ?? String(value);
 }
 
 /** A stat card: a label above a prominent value, an optional note beneath. Text is written into the same nodes. */
@@ -446,7 +451,7 @@ th[scope=col]{background:var(--surface-2);color:var(--muted);font-size:.72rem;le
 .badge{display:none;margin-left:4px;padding:0 6px;border-radius:5px;background:var(--urgent-soft);color:var(--urgent);font-size:.68rem;font-style:normal;font-weight:800;text-transform:uppercase;vertical-align:1px}
 .tl:has([data-urgency=urgent]) .badge{display:inline-block}
 @media (max-width:900px){body>header{flex-wrap:wrap;row-gap:4px}}
-@media (max-width:640px){body>header form{order:9;flex:1 1 100%}.find-profile{width:100%;box-sizing:border-box;margin:0}body>header{flex-wrap:wrap;row-gap:4px;font-size:14px}body>header b{margin-right:2px}@media (max-width:430px){body>header b{display:none}}nav a{padding:5px 7px}.api-pill{font-size:.7rem;padding:2px 8px}.stat-row{grid-template-columns:repeat(2,minmax(0,1fr))}.stat-value{font-size:1.3rem}.stat-pot .stat-value{font-size:1.5rem}.panel{padding:12px}h1{font-size:1.35rem}}
+@media (max-width:640px){.refresh-label{display:none}body>header form{order:9;flex:1 1 200px}body>header button{order:10}.find-profile{width:100%;box-sizing:border-box;margin:0}body>header{flex-wrap:wrap;row-gap:4px;font-size:14px}body>header b{margin-right:2px}@media (max-width:430px){body>header b{display:none}}nav a{padding:5px 7px}.api-pill{font-size:.7rem;padding:2px 8px}.stat-row{grid-template-columns:repeat(2,minmax(0,1fr))}.stat-value{font-size:1.3rem}.stat-pot .stat-value{font-size:1.5rem}.panel{padding:12px}h1{font-size:1.35rem}}
 `;
 
 start();

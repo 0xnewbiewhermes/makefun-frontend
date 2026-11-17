@@ -96,7 +96,7 @@ export async function mountLeaderboardView(root, { slug }, route) {
   const rail = matchMedia('(min-width:1180px)').matches ? mountBoardTable(view.rail, { currentSlug: slug, compact: true, mini: true, route }) : null;
   const scheduleVirtualise = oncePerFrame(virtualiseLeaderboardRows.bind(null, view));
   view.search.addEventListener('input', () => filterRowsOnEachKeystroke(view));
-  view.spacer.addEventListener('click', (event) => event.target.closest('a') || selectEntrantInPlace(view, rowEntry(view, event.target)));
+  view.spacer.addEventListener('click', (event) => event.target.closest('a') || openOrSelectEntrant(view, rowEntry(view, event.target)));
   view.spacer.addEventListener('keydown', (event) => moveSelectionWithKeys(view, event));
   const onBoard = route.whenCurrent((fresh) => applyLeaderboardData(view, slug, fresh));
   const onBounty = route.whenCurrent((fresh) => applyBountyData(view, fresh));
@@ -165,6 +165,12 @@ function applyLeaderboardData(view, slug, board) {
   setText(view.phase.note, board.phase?.placements_held ? 'places unofficial for now' : 'places final');
   filterRowsOnEachKeystroke(view);
   selectEntrantInPlace(view, rows.find((row) => row.id === view.state.selectedId) || rows[0]);
+}
+
+/** Desktop: select the row into the card. Phone (the card is hidden there): open the entrant's profile. */
+function openOrSelectEntrant(view, entry) {
+  if (!view.card.node.offsetParent && entry?.handle) location.hash = profileHref(entry.handle);
+  else selectEntrantInPlace(view, entry);
 }
 
 const rowEntry = (view, target) => view.rowPool.find((pooled) => pooled.row.contains(target))?.entry;
@@ -352,6 +358,6 @@ adoptViewStyles(`
 .ec-band b{position:absolute;top:-3px;left:calc(var(--at) - 2px);width:4px;height:14px;border-radius:2px;background:var(--accent)}
 .ec-profile{margin-top:2px}
 .ec-hint{margin:0;font-size:.74rem}
-@media (max-width:899px){.lb-page{grid-template-columns:minmax(0,1fr)}.entrant-card{order:-1}.ec-facts{grid-template-columns:repeat(2,minmax(0,1fr));column-gap:12px}.ec-hint{display:none}}
-@media (max-width:640px){.lb-row{grid-template-columns:1.8rem minmax(0,1fr) 5rem 4.2rem;gap:6px;padding:0 8px}.col-record,.col-received{display:none}.col-rank{font-size:1rem}.lb-main .subtabs{display:none}.lb-main .stat-row{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:899px){.lb-page{grid-template-columns:minmax(0,1fr)}.entrant-card{display:none}}
+@media (max-width:640px){.lb-row{grid-template-columns:1.8rem minmax(0,1fr) 5rem 4.2rem;gap:6px;padding:0 8px}.col-record,.col-received{display:none}.col-rank{font-size:1rem}.lb-main .subtabs{display:none}.lb-head{font-size:.6rem;letter-spacing:0}.lb-head .col-score small{display:none}.lb-head .col-prize,.lb-head .col-rank{font-size:.6rem}.lb-head>*{white-space:normal;line-height:1.1}.lb-main .stat-row{grid-template-columns:repeat(2,minmax(0,1fr))}}
 `);
