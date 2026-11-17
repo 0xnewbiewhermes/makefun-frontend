@@ -9,7 +9,8 @@ export async function mountProfileView(root, { handle }, route) {
   if (!route.isCurrent()) return;
   document.title = `@${profile.handle} · make.fun`;
   const record = profile.record || {};
-  const solutions = profile.solutions || [];
+  // Prizes and places first, then the rest in the API's order (newest first).
+  const solutions = (profile.solutions || []).map((solution, index) => ({ solution, index })).sort((a, b) => Number(b.solution.prize_usd || 0) - Number(a.solution.prize_usd || 0) || (a.solution.placement || 1e9) - (b.solution.placement || 1e9) || a.index - b.index).map(({ solution }) => solution);
   const solutionsBody = el('tbody');
   const moreButton = el('button', { type: 'button', className: 'button show-more', onclick: () => appendNextPageOfEntries(solutionsBody, solutions, moreButton) }, 'Show more entries');
 
@@ -31,7 +32,7 @@ export async function mountProfileView(root, { handle }, route) {
       el(
         'section',
         { className: 'panel' },
-        el('h2', null, 'Results ', el('span', { className: 'muted' }, `(${solutions.length} entries)`)),
+        el('h2', null, 'Results ', el('span', { className: 'muted' }, `(${solutions.length} entries · prizes and places first)`)),
         el('div', { className: 'table-scroll' }, el('table', { className: 'solutions-table' }, el('thead', null, el('tr', null, headings)), solutionsBody)),
         !solutions.length && el('p', { className: 'empty-state' }, 'No public entries yet.'),
         moreButton,

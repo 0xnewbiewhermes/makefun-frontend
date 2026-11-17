@@ -395,5 +395,5 @@ th[scope=col]{background:var(--surface-2);color:var(--muted);font-size:.72rem;le
 .tl:has([data-urgency=urgent]) .bar::after{background:var(--urgent)}
 .badge{display:none;margin-left:4px;padding:0 6px;border-radius:5px;background:var(--urgent-soft);color:var(--urgent);font-size:.68rem;font-style:normal;font-weight:800;text-transform:uppercase;vertical-align:1px}
 .tl:has([data-urgency=urgent]) .badge{display:inline-block}
-@media (max-width:640px){body>header{flex-wrap:wrap;row-gap:4px;font-size:14px}body>header b{margin-right:2px}nav a{padding:5px 7px}.api-pill{font-size:.7rem;padding:2px 8px}.stat-row{grid-template-columns:repeat(2,minmax(0,1fr))}.stat-value{font-size:1.3rem}.stat-pot .stat-value{font-size:1.5rem}.panel{padding:12px}h1{font-size:1.35rem}}
+@media (max-width:640px){body>header{flex-wrap:wrap;row-gap:4px;font-size:14px}body>header b{margin-right:2px}@media (max-width:430px){body>header b{display:none}}nav a{padding:5px 7px}.api-pill{font-size:.7rem;padding:2px 8px}.stat-row{grid-template-columns:repeat(2,minmax(0,1fr))}.stat-value{font-size:1.3rem}.stat-pot .stat-value{font-size:1.5rem}.panel{padding:12px}h1{font-size:1.35rem}}
 `;

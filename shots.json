@@ -1,5 +1,30 @@
 [
-  { "file": "1-board.jpg", "path": "#/", "viewport": { "width": 1280, "height": 800 } },
-  { "file": "2-bounty.jpg", "path": "#/bounty/makefun-frontend-01", "viewport": { "width": 1280, "height": 800 } },
-  { "file": "3-leaderboard.jpg", "path": "#/bounty/makefun-frontend-01/leaderboard", "viewport": { "width": 1280, "height": 800 } }
+  {
+    "file": "1-board-bounty.jpg",
+    "path": "#/bounty/makefun-frontend-01",
+    "viewport": {
+      "width": 1280,
+      "height": 800
+    },
+    "deviceScaleFactor": 1
+  },
+  {
+    "file": "2-leaderboard.jpg",
+    "path": "#/bounty/token-radar-01/leaderboard",
+    "viewport": {
+      "width": 840,
+      "height": 525
+    },
+    "deviceScaleFactor": 1.5238
+  },
+  {
+    "file": "3-profile-phone.jpg",
+    "path": "#/u/superskie",
+    "viewport": {
+      "width": 360,
+      "height": 640
+    },
+    "deviceScaleFactor": 2,
+    "mobile": true
+  }
 ]

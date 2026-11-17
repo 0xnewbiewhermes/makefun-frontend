@@ -4,16 +4,25 @@
 [![rank](https://make.fun/badge/makefun-frontend-01/0xnewbiewhermes/makefun-frontend/rank.svg)](https://make.fun/bounty/makefun-frontend-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=makefun-frontend-01)
 [![reward](https://make.fun/badge/makefun-frontend-01/0xnewbiewhermes/makefun-frontend/reward.svg)](https://make.fun/bounty/makefun-frontend-01?utm_source=github&utm_medium=readme&utm_campaign=makefun-frontend-01)
 
-A fast, read-only make.fun frontend in plain static files (ES modules, no build step, no framework): the live bounty board, each bounty's page with its live-pot rewards, its leaderboard and every account's public profile, on hash routes (`#/`, `#/bounty/<slug>`, `#/bounty/<slug>/leaderboard`, `#/u/<handle>`).
+A fast, read-only make.fun frontend in plain static files (ES modules, no build step, no framework): a dense live bounty board, each bounty's page with the board beside it, its leaderboard, and every account's public profile, on hash routes (`#/`, `#/bounty/<slug>`, `#/bounty/<slug>/leaderboard`, `#/u`, `#/u/<handle>`).
 
-- **First load: 1 file, 2.4 KB gzipped** (2,435 bytes gzip-9): `index.html` carries the board's CSS (light and dark palettes, so the first frame already follows the system colour scheme) and an inline module that reads the open bounties once and paints the cards. `app.js` (response cache, router, board controls, countdown ticker) loads by `import()` after that first paint and takes over the same nodes; the bounty page, leaderboard and profile are `import()`ed on first use (warmed when idle) and bring their own CSS as adopted stylesheets.
-- **One request per view** (the bounty page's rail reuses the board's cached read; opened directly on a wide screen it makes a second), cached in memory. make.fun's answers are bound to the minute, so a cached answer is served from memory while its minute lasts, then served at once while one re-read runs (stale-while-revalidate); the open view re-reads once each minute while the tab is visible, and an answer equal to the cached one repaints nothing. No `If-None-Match`: the API's 304 carries no `Access-Control-Allow-Origin`, so a browser cannot read it, and the header would add a CORS preflight.
-- **Live API pill** in the header ("API: 4 requests · 3 served from cache · 1 revalidated"), counted where it happens (`fetchIntoCache`, `readCached`, `peekCached`, plus index.html's own first read) and checked against the browser's network log. Typing in the board search or the leaderboard filter adds nothing to it: both filter the rows already in memory on each keystroke.
-- **In-place updates**: board cards are keyed by slug and patched (re-sorting moves nodes, never rebuilds them); every countdown is a `[data-deadline]` node rewritten by one 1 s timer.
-- **Master-detail** from 1100 px: the bounty page keeps the board's list beside it (one rail element, reused from bounty to bounty).
-- **Virtual leaderboard**: every ranked row is reachable by scrolling, but only the rows in view (plus a few each side) exist, pooled at a fixed height over one spacer; the page says how many ("16 of 125 rows in the DOM").
-- **Decision help on every card**: live pot, entry fee and time left up front, plus entries per paid place.
-- Works from a 390 px phone up, in light and dark mode.
+## Screens
+
+| | |
+|---|---|
+| **Board + bounty** (cover) | The live board as a table beside the open bounty: pot, fee, time left with a deadline bar (a red "closing soon" badge in the last hour), entries; Live / Ended tabs, sort chips, category chips and a filter. The bounty shows live pot (reward + fees), entry fee (how many paid), time left, entries (how many passed the checks), the rewards the live pot pays now with bars, the dates as a timeline with a "Now" marker, and a top-5 preview. |
+| **Leaderboard** | Pot, time left, entries ranked and leader cards over a virtual list with a "prize now" column (each paid place's share of the live pot, from `rewardsNow`); the page says "12 of 7,456 rows in the DOM". |
+| **Profile** | Prize money, bounties won, ranked in and best place cards over a results table (prizes and places first, 25 at a time). `#/u` finds a handle and lists the entrants leading the biggest live leaderboard. |
+
+## How it is built
+
+- **First load: 1 file, 855 bytes gzipped** (`app/index.html`: the page frame, header tabs, footer strip and a one-line router). `app.js` (cache, router, ticker, shared helpers and styles) and one view per surface (`board.js`, `bounty.js`, `leaderboard.js`, `profile.js`) load by `import()`; each view brings its own CSS as an adopted stylesheet, and the views are warmed when the browser is idle.
+- **Cached reads, revalidated each minute**: make.fun's answers are bound to the minute, so a cached answer is served from memory while its minute lasts, then served at once while one re-read runs (stale-while-revalidate). The open view re-reads once a minute while the tab is visible, and an answer equal to the cached one repaints nothing. No `If-None-Match`: the API's 304 carries no `Access-Control-Allow-Origin`, so a browser cannot read it, and the header would add a CORS preflight. The Refresh button drops the cache and re-reads.
+- **Live API pill** in the header, per view ("this view: 3 API requests · 0 from memory · 1 revalidated (1 unchanged)"), counted where it happens (`fetchIntoCache`, `readCached`, `peekCached`). Typing in the board filter or the leaderboard filter adds nothing to it: both filter rows already in memory on each keystroke.
+- **Rows patched in place**: board rows are keyed by slug and rewritten (sorting and filtering move the same nodes, never rebuild them); one 1 s timer rewrites every `[data-deadline]` countdown and its deadline bar.
+- **Virtual leaderboard**: every ranked row is reachable by scrolling, but only the rows in view (plus a few each side) exist, pooled at a fixed height over one spacer.
+- **Footer strip on every screen** states the same facts the code backs: 1-file first load, views by `import()`, cached reads revalidated each minute, rows patched in place, virtual leaderboard.
+- Works from a 360 px phone up (the board table drops to pot and time left, with fee and entries under each title), in light and dark mode.
 
 ## Run it
 

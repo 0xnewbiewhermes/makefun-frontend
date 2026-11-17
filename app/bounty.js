@@ -12,7 +12,10 @@ export async function mountBountyView(root, { slug }, route) {
   const fromBoard = peekCached(apiPaths.board())?.items?.find((item) => item.slug === slug);
   if (fromBoard) patchBountyInPlace(root, view, fromBoard);
   const onChange = route.whenCurrent((fresh) => patchBountyInPlace(root, view, fresh));
-  const bounty = await readCached(apiPaths.bounty({ slug }), onChange);
+  const bounty = await readCached(apiPaths.bounty({ slug }), onChange).catch(async (error) => {
+    (await rail)?.unmount();
+    throw error;
+  });
   if (!route.isCurrent()) return (await rail)?.unmount();
   patchBountyInPlace(root, view, bounty);
   const onTop = route.whenCurrent((fresh) => patchTopFive(view, fresh));
@@ -282,16 +285,16 @@ adoptViewStyles(`
 .bounty-tags{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
 .bounty-title{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
 .bounty-title .button{flex:none;white-space:nowrap}
-.bounty-summary{max-width:75ch;margin:0;color:var(--muted);font-size:1rem;line-height:1.4}
+.bounty-summary{max-width:75ch;margin:0;color:var(--muted);font-size:1rem;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .skill-list{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px;padding:0;list-style:none}
 .bounty-split{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:10px;align-items:start}
 .panel-note{margin:0 0 6px}
-.rewards-table td,.rewards-table th{padding:4px 6px;white-space:nowrap;border-bottom-color:var(--surface-2)}
+.rewards-table td,.rewards-table th{padding:3px 6px;white-space:nowrap;border-bottom-color:var(--surface-2)}
 .rewards-table th{font-weight:700}
 .rw-bar{width:99%}
 .rw-bar i{display:block;height:8px;border-radius:4px;background:var(--money);opacity:.35}
 .prize-amount{text-align:right;color:var(--money);font-weight:800}
-.prize-amount small{display:block;color:var(--muted);font-size:.7rem;font-weight:500}
+.prize-amount small{display:block;color:var(--muted);font-size:.7rem;font-weight:500;line-height:1.1}
 .podium-1>:first-child{color:var(--gold)}
 .timeline{list-style:none;margin:0;padding:0 0 0 14px;border-left:2px solid var(--border);display:grid;gap:8px;font-size:.88rem}
 .timeline li{position:relative;display:grid}
