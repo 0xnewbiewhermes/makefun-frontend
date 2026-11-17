@@ -11,19 +11,6 @@ export function readCached(path, onChange) {
   return Promise.resolve(cached.data);
 }
 
-/** The header's API pill, per view: network requests, answers served from memory, re-reads and how many found nothing new. */
-function countTraffic(kind) {
-  apiTraffic[kind]++;
-  if (kind === 'revalidated') apiTraffic.requests++;
-  paintPill();
-}
-
-function paintPill() {
-  const { requests, cached, revalidated, unchanged } = apiTraffic;
-  const parts = [`${requests} API request${requests === 1 ? '' : 's'}`, `${cached} from memory`, revalidated && `${revalidated} revalidated (${unchanged} unchanged)`];
-  setText(apiPill, 'this view: ' + parts.filter(Boolean).join(' · '));
-}
-
 /** Re-read `path` once a minute, just after the minute turns, while the tab is visible (and on return to it). */
 export function revalidateWhileVisible(path, onChange) {
   const revalidate = revalidateIfStale.bind(null, path, onChange);
@@ -69,6 +56,19 @@ export function start() {
   addEventListener('hashchange', renderCurrentRoute);
   setInterval(tickCountdownsInPlace, 1000);
   renderCurrentRoute().then(warmLaterViewsWhenIdle);
+}
+
+/** The header's API pill, per view: network requests, answers served from memory, re-reads and how many found nothing new. */
+function countTraffic(kind) {
+  apiTraffic[kind]++;
+  if (kind === 'revalidated') apiTraffic.requests++;
+  paintPill();
+}
+
+function paintPill() {
+  const { requests, cached, revalidated, unchanged } = apiTraffic;
+  const parts = [`${requests} API request${requests === 1 ? '' : 's'}`, `${cached} from memory`, revalidated && `${revalidated} revalidated (${unchanged} unchanged)`];
+  setText(apiPill, 'this view: ' + parts.filter(Boolean).join(' · '));
 }
 
 async function renderCurrentRoute() {

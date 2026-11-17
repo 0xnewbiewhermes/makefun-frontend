@@ -2,18 +2,11 @@
 // route (#/) and the rail beside an open bounty. Rows are keyed by slug, rewritten in place and reordered by moving the
 // same nodes, so filtering, sorting and the minute's revalidation never rebuild the table.
 
-import { adoptViewStyles, apiPaths, bountyHref, el, formatCount, formatEntryFee, formatTimeLeft, formatUsd, isLive, livePot, paidPlaces, patchChildrenInPlace, peekCached, readCached, revalidateWhileVisible, setText, statCard } from './app.js';
-
-const SORTS = {
-  ending: ['Closing soon', (a, b) => new Date(a.deadline) - new Date(b.deadline)],
-  pot: ['Biggest pot', (a, b) => livePot(b) - livePot(a)],
-  entries: ['Most entries', (a, b) => b.submissionCount - a.submissionCount],
-  odds: ['Fewest per place', (a, b) => a.submissionCount / paidPlaces(a) - b.submissionCount / paidPlaces(b)],
-};
-const filters = { tab: 'live', sort: 'ending', category: 'all', query: '', limit: 30 };
+import { adoptViewStyles, apiPaths, bountyHref, el, formatCount, formatEntryFee, formatTimeLeft, formatUsd, isLive, livePot, paidPlaces, patchChildrenInPlace, readCached, revalidateWhileVisible, setText, statCard } from './app.js';
 
 /** The board table in `host`; `currentSlug` marks the open bounty. Returns { unmount }. */
-export async function mountBoardTable(host, { currentSlug = '', compact = false, route, onData } = {}) {
+export async function mountBoardTable(host, options) {
+  const { currentSlug = '', compact = false, route, onData } = options;
   const rows = new Map();
   let items = [];
   const search = el('input', { type: 'search', className: 'input', placeholder: 'Filter bounties…', 'aria-label': 'Filter bounties', value: filters.query });
@@ -26,9 +19,6 @@ export async function mountBoardTable(host, { currentSlug = '', compact = false,
   const head = ['Bounty', 'Pot', 'Fee', 'Time left', 'Entries', 'Per place'].map((label, index) => el('th', { scope: 'col', className: ['', 'num', 'num', '', 'num', 'num x'][index] }, label));
   const node = el('section', { className: `btable${compact ? ' compact' : ''}`, 'aria-label': 'Bounty board' }, el('div', { className: 'bt-top' }, tabs, search), sorts, cats, el('div', { className: 'table-scroll' }, el('table', null, el('thead', null, el('tr', null, head)), body)), empty, more);
   host.append(node);
-
-  const ended = () => (peekCached(apiPaths.ended())?.items || []).filter((item) => !items.some((it) => it.slug === item.slug));
-  const pool = () => (filters.tab === 'live' ? items.filter(isLive) : [...items.filter((item) => !isLive(item)), ...ended()].sort((a, b) => new Date(b.deadline) - new Date(a.deadline)));
 
   function apply() {
     const all = pool();
@@ -82,6 +72,10 @@ export async function mountBoardTable(host, { currentSlug = '', compact = false,
     return row.node;
   }
 
+  let endedItems = [];
+  const ended = () => endedItems.filter((item) => !items.some((it) => it.slug === item.slug));
+  const pool = () => (filters.tab === 'live' ? items.filter(isLive) : [...items.filter((item) => !isLive(item)), ...ended()].sort((a, b) => new Date(b.deadline) - new Date(a.deadline)));
+
   const take = (data) => {
     items = data.items;
     onData?.(items.filter(isLive));
@@ -98,7 +92,7 @@ export async function mountBoardTable(host, { currentSlug = '', compact = false,
     else if (button.dataset.tab) {
       filters.tab = button.dataset.tab;
       filters.limit = 30;
-      if (filters.tab === 'ended') await readCached(apiPaths.ended()).catch(() => {});
+      if (filters.tab === 'ended') endedItems = (await readCached(apiPaths.ended()).catch(() => ({ items: [] }))).items;
     } else if (button.dataset.sort) filters.sort = button.dataset.sort;
     else filters.category = button.dataset.category;
     apply();
@@ -141,6 +135,14 @@ export async function mountBoardView(root, _params, route) {
   if (!route.isCurrent()) return table.unmount();
   return table.unmount;
 }
+
+const SORTS = {
+  ending: ['Closing soon', (a, b) => new Date(a.deadline) - new Date(b.deadline)],
+  pot: ['Biggest pot', (a, b) => livePot(b) - livePot(a)],
+  entries: ['Most entries', (a, b) => b.submissionCount - a.submissionCount],
+  odds: ['Fewest per place', (a, b) => a.submissionCount / paidPlaces(a) - b.submissionCount / paidPlaces(b)],
+};
+const filters = { tab: 'live', sort: 'ending', category: 'all', query: '', limit: 30 };
 
 adoptViewStyles(`
 .bt-top{display:flex;gap:8px;align-items:center;margin-bottom:8px}
