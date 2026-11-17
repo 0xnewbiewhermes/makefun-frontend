@@ -183,7 +183,7 @@ const responseCache = new Map(),
   inflightRequests = new Map(),
   apiTraffic = { requests: 0, cached: 0, unchanged: 0 },
   apiPill = el('output', { className: 'api-pill', title: 'JSON reads counted live by fetchIfNoneMatch and readCachedEtag in app.js (avatar images load separately)' });
-const FOOTER_FACTS = '1-file first load · ETag-revalidated reads · in-flight dedupe · rows patched in place · virtual leaderboard · 1 request a view';
+const FOOTER_FACTS = '1-file first load · ETag-revalidated reads · in-flight dedupe · rows patched in place · virtual leaderboard · at most 1 request a view from the board';
 let lastSlug = '',
   hoverTimer = 0;
 

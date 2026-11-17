@@ -22,7 +22,7 @@ A fast, read-only make.fun frontend in plain static files (ES modules, no build 
 - **Live API pill** in the header, per view ("this view: 1 API request · 0 unchanged (ETag) · 2 from memory"), counted where it happens (`fetchIfNoneMatch`, `readCachedEtag`, `peekCached`): JSON reads only (avatar images load separately), and a prefetch counts in the view that sent it. Typing in the board filter or the leaderboard filter adds nothing to it: both filter rows already in memory on each keystroke.
 - **Rows patched in place**: board rows are keyed by slug and rewritten (sorting and filtering move the same nodes, never rebuild them); one 1 s timer rewrites every `[data-deadline]` countdown and its deadline bar.
 - **Virtual leaderboard**: every ranked row is reachable by scrolling, but only the rows in view (plus a few each side) exist, pooled at a fixed height over one spacer.
-- **Footer strip on every screen** states the facts the code backs: 1-file first load, ETag-revalidated reads, in-flight dedupe, rows patched in place, virtual leaderboard, one request a view.
+- **Footer strip on every screen** states the facts the code backs: 1-file first load, ETag-revalidated reads, in-flight dedupe, rows patched in place, virtual leaderboard, at most one request a view from the board.
 - Works from a 360 px phone up (the board table drops to pot and time left, with fee and entries under each title), in light and dark mode.
 
 ## Run it

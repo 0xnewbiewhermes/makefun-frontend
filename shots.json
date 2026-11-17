@@ -7,7 +7,7 @@
       "height": 800
     },
     "deviceScaleFactor": 1,
-    "via": "#/"
+    "via": "#/ (rest the pointer on the bounty link, then click)"
   },
   {
     "file": "2-leaderboard.jpg",
@@ -16,7 +16,8 @@
       "width": 840,
       "height": 525
     },
-    "deviceScaleFactor": 1.5238
+    "deviceScaleFactor": 1.5238,
+    "via": "#/ then #/bounty/token-radar-01 then the Leaderboard tab"
   },
   {
     "file": "3-profile-phone.jpg",
@@ -26,6 +27,7 @@
       "height": 640
     },
     "deviceScaleFactor": 2,
-    "mobile": true
+    "mobile": true,
+    "via": "#/"
   }
 ]
